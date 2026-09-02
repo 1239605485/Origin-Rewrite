@@ -462,6 +462,37 @@ static void apply_reference_test_overlay(patch_handle_t instance,
                 (long long)vanilla->life_max, life_max, life_current, damage, defense);
 }
 
+/* Absolute minimum callback probe. This intentionally does not depend on
+ * NPC.type, active, boss/friendly flags, world progress, mode, probability,
+ * state storage, AI, networking, or loot. It is used only by the 100%-chance
+ * diagnostic build, so a normal NPC SetDefaults callback must visibly change
+ * lifeMax/life even if a higher-level compatibility check is incomplete. */
+static void apply_minimal_life_probe(patch_handle_t instance) {
+    int32_t vanilla_life_max = 0;
+    int32_t vanilla_life = 0;
+    int32_t probe_life_max;
+    int32_t probe_life;
+    int32_t readback_life_max = -1;
+    int32_t readback_life = -1;
+    bool max_ok;
+    bool life_ok;
+    if (!instance || !g_adapter.runtime || !g_adapter.config ||
+        g_adapter.config->modes[OR_MODE_CLASSIC].elite_chance < 0.999f ||
+        !read_i32(g_adapter.runtime->field_life_max, instance, &vanilla_life_max) ||
+        vanilla_life_max <= 0) return;
+    if (!read_i32(g_adapter.runtime->field_life, instance, &vanilla_life) ||
+        vanilla_life <= 0) vanilla_life = vanilla_life_max;
+    probe_life_max = clamp_i32((int64_t)llround((double)vanilla_life_max * 1.25));
+    probe_life = clamp_i32((int64_t)llround((double)vanilla_life * 1.25));
+    max_ok = field_write(g_adapter.runtime->field_life_max, instance, &probe_life_max);
+    life_ok = field_write(g_adapter.runtime->field_life, instance, &probe_life);
+    (void)read_i32(g_adapter.runtime->field_life_max, instance, &readback_life_max);
+    (void)read_i32(g_adapter.runtime->field_life, instance, &readback_life);
+    OR_DIAG_LOG("minimal_life_probe vanilla=%d/%d write=%s/%s readback=%d/%d",
+                vanilla_life, vanilla_life_max, max_ok ? "ok" : "fail",
+                life_ok ? "ok" : "fail", readback_life, readback_life_max);
+}
+
 static bool commit_elite_from_baseline(patch_handle_t instance,
                                        OR_NativeBinding *binding,
                                        const OR_VanillaStats *vanilla,
@@ -647,6 +678,7 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
      * lifecycle flag; the reference implementation applies its overlay as
      * soon as this postfix runs. */
     if (!instance || !g_adapter.runtime || !g_adapter.config || !g_adapter.state) return;
+    apply_minimal_life_probe(instance);
     binding = get_or_create_binding(instance);
     if (!binding) return;
     /* A new SetDefaults lifecycle invalidates any state left by a reused

@@ -2,7 +2,7 @@
 
 这是基于 v0.4 设计文档的 C11 实现。项目采用“原版 NPC + 运行时精英状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.1.12` 是移动端属性诊断版：符合资格的敌怪生成概率暂时固定为 100%，并在 SetDefaults、参考源直写、精英提交和 `lifeMax/life` 写回回读阶段输出 `[OR_DIAG]` 记录，便于确认属性 Hook；测试完成后应移除参考源直写诊断通道，再恢复按普通/专家/大师/天顶模式分别配置的概率。
+当前 `0.1.13` 是移动端最小回调诊断版：符合资格的敌怪生成概率暂时固定为 100%，SetDefaults 回调一进入就直接将 `lifeMax/life` 写为原值的 1.25 倍，并在回读阶段输出 `[OR_DIAG]` 记录，便于把 Hook/字段问题与精英状态逻辑分离；测试完成后应移除诊断通道，再恢复按普通/专家/大师/天顶模式分别配置的概率。
 
 诊断记录包含 `vanillaLife`、`finalLife`、`writeOk`、`readbackLifeMax` 和 `readbackLife`。其中 `readbackLifeMax` 与 `finalLife` 相同，才表示最大生命确实写入成功；如果日志包没有包含模组输出，可从 Android logcat 过滤 `OriginRewrite` 标签。
 

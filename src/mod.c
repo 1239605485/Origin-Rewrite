@@ -21,9 +21,9 @@ static OR_Runtime g_runtime;
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026090212,
+    .version_code = 2026090213,
     .api_version = 1,
-    .version = "0.1.12"
+    .version = "0.1.13"
 };
 
 static void init_mod(kernel_mod_handle_t *handle) {
