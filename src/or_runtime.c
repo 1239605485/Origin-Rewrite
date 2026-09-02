@@ -252,9 +252,11 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     runtime->field_boss = or_resolve_field(runtime->npc_type, "boss", true, PATCH_BOOL, sizeof(bool));
     runtime->field_ai_style = or_resolve_field(runtime->npc_type, "aiStyle", true, PATCH_INT32, sizeof(int32_t));
 
-    fields_ok = runtime->field_active && runtime->field_life_max && runtime->field_life &&
+    /* active and value are optional compatibility/reward fields. The core
+     * elite stat overlay only needs the vanilla combat fields below. */
+    fields_ok = runtime->field_life_max && runtime->field_life &&
                 runtime->field_damage && runtime->field_defense && runtime->field_knockback_resist &&
-                runtime->field_scale && runtime->field_value;
+                runtime->field_scale;
     runtime->capabilities.stats_fields_resolved = fields_ok;
 
     main_type = patchlib_type_get_type("Terraria", "Main");

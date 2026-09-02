@@ -195,6 +195,10 @@ static bool host_authority(bool *single_player, bool *known) {
     if (!g_adapter.runtime || !read_i32(g_adapter.runtime->main_net_mode, NULL, &net_mode)) {
         return false;
     }
+    /* The field API has a void getter, so an unavailable Android static read
+     * can leave the sentinel value unchanged. Only Terraria's documented
+     * 0/1/2 values count as a known network state. */
+    if (net_mode < 0 || net_mode > 2) return false;
     if (known) *known = true;
     if (single_player) *single_player = net_mode == 0;
     return net_mode == 0 || net_mode == 2;
@@ -270,8 +274,7 @@ static bool read_vanilla_stats(patch_handle_t instance,
         !read_i32(g_adapter.runtime->field_damage, instance, &damage) ||
         !read_i32(g_adapter.runtime->field_defense, instance, &defense) ||
         !read_float(g_adapter.runtime->field_knockback_resist, instance, &knockback) ||
-        !read_float(g_adapter.runtime->field_scale, instance, &scale) ||
-        !read_float(g_adapter.runtime->field_value, instance, &value)) {
+        !read_float(g_adapter.runtime->field_scale, instance, &scale)) {
         return false;
     }
     /* SetDefaults is the verified activation boundary on the target mobile
@@ -279,6 +282,7 @@ static bool read_vanilla_stats(patch_handle_t instance,
      * after the object enters the live pool. */
     (void)read_bool(g_adapter.runtime->field_active, instance, &local_active);
     (void)read_float(g_adapter.runtime->field_npc_slots, instance, &slots);
+    (void)read_float(g_adapter.runtime->field_value, instance, &value);
     if (is_boss) *is_boss = false;
     if (is_town) *is_town = false;
     if (is_friendly) *is_friendly = false;
@@ -363,13 +367,16 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     const OR_EliteRecord *record;
     if (!binding || !vanilla || !g_adapter.runtime || !g_adapter.config ||
         !g_adapter.state || binding->roll_resolved) return false;
-    /* Do not consume the lifecycle until the host/client decision is known.
-     * On Android, a static Main field can be unavailable during SetDefaults;
-     * AI must be allowed to retry once the runtime has finished initializing.
-     * A known non-host is still resolved immediately and never mutates state. */
+    /* A known multiplayer client must not mutate the authoritative state. If
+     * Main.netMode is unavailable, keep the reference mod's SetDefaults
+     * behavior and allow the local stat overlay; this optional field must not
+     * disable the core feature on Android. */
     if (!host_authority(&single_player, &authority_known)) {
-        if (authority_known) binding->roll_resolved = true;
-        return false;
+        if (authority_known) {
+            binding->roll_resolved = true;
+            return false;
+        }
+        single_player = true;
     }
     binding->roll_resolved = true;
     progress = current_progress();
@@ -399,7 +406,12 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.weather = OR_WEATHER_CLEAR;
     context.is_night = false;
     context.archetype = OR_AI_ARCHETYPE_MELEE;
-    context.max_active_elites = g_adapter.config->max_active_elites;
+    /* SetDefaults runs before NPC.active is reliable and also runs for
+     * internal/template NPC objects. Applying the live-elite cap here can
+     * consume all slots before the first visible enemy is spawned. The cap
+     * belongs to a real active-spawn boundary; this verified direct hook must
+     * retain enough state slots to apply the stat overlay consistently. */
+    context.max_active_elites = OR_MAX_TRACKED_NPCS;
     context.vanilla = *vanilla;
     memset(&spawn, 0, sizeof(spawn));
     if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
@@ -574,7 +586,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     if (!runtime || !config || !state || !config->enable_gameplay_hooks ||
         !runtime->capabilities.patchlib_available ||
         !runtime->capabilities.stats_fields_resolved ||
-        !runtime->method_ai || !runtime->main_net_mode) return false;
+        !runtime->method_ai) return false;
     memset(&g_adapter, 0, sizeof(g_adapter));
     g_adapter.runtime = runtime;
     g_adapter.config = config;
