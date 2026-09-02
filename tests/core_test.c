@@ -39,6 +39,7 @@ static void test_config_and_stats(void) {
 
     or_config_default(&config);
     CHECK(or_config_validate(&config));
+    CHECK(config.modes[OR_MODE_CLASSIC].elite_chance == 1.0f);
     CHECK(config.max_active_elites == 8u);
     CHECK(config.progress[OR_PROGRESS_PRE_HARDMODE].tier_weight[OR_MODE_CLASSIC][OR_TIER_APOCALYPSE] == 0.0f);
     CHECK(config.progress[OR_PROGRESS_HARDMODE_PRE_MECH].tier_weight[OR_MODE_CLASSIC][OR_TIER_APOCALYPSE] > 0.0f);
@@ -254,10 +255,9 @@ static void test_spawn_authority(void) {
     CHECK(result.reason == OR_SPAWN_REJECT_NOT_AUTHORITY);
 
     context.host_authority = true;
-    for (seed = 1; seed < 1000 && !spawned; ++seed) {
-        context.spawn_tick = seed;
-        spawned = or_spawn_try_commit(&config, &store, &context, seed, &result);
-    }
+    seed = 1u;
+    context.spawn_tick = seed;
+    spawned = or_spawn_try_commit(&config, &store, &context, seed, &result);
     CHECK(spawned);
     CHECK(result.committed && result.tier != OR_TIER_NONE);
     CHECK(or_state_active_count(&store) == 1u);

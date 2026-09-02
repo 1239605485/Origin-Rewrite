@@ -76,11 +76,13 @@ void or_config_default(OR_Config *config) {
     config->journey_probability_multiplier = 1.0f;
     config->allow_pre_hardmode_apocalypse = false;
 
-    config->modes[OR_MODE_CLASSIC] = (OR_ModeConfig){0.20f, 1.00f, 1.00f, 1.00f, 0.00f};
-    config->modes[OR_MODE_EXPERT] = (OR_ModeConfig){0.30f, 1.15f, 1.10f, 1.05f, 0.10f};
-    config->modes[OR_MODE_MASTER] = (OR_ModeConfig){0.40f, 1.35f, 1.25f, 1.10f, 0.20f};
-    config->modes[OR_MODE_ZENITH] = (OR_ModeConfig){0.50f, 1.60f, 1.45f, 1.15f, 0.30f};
-    config->modes[OR_MODE_JOURNEY] = (OR_ModeConfig){0.20f, 1.00f, 1.00f, 1.00f, 0.00f};
+    /* Temporary verification setting: every eligible NPC is upgraded so the
+     * mobile Hook path can be tested without waiting for a random roll. */
+    config->modes[OR_MODE_CLASSIC] = (OR_ModeConfig){1.00f, 1.00f, 1.00f, 1.00f, 0.00f};
+    config->modes[OR_MODE_EXPERT] = (OR_ModeConfig){1.00f, 1.15f, 1.10f, 1.05f, 0.10f};
+    config->modes[OR_MODE_MASTER] = (OR_ModeConfig){1.00f, 1.35f, 1.25f, 1.10f, 0.20f};
+    config->modes[OR_MODE_ZENITH] = (OR_ModeConfig){1.00f, 1.60f, 1.45f, 1.15f, 0.30f};
+    config->modes[OR_MODE_JOURNEY] = (OR_ModeConfig){1.00f, 1.00f, 1.00f, 1.00f, 0.00f};
 
     config->tiers[OR_TIER_NONE] =
         (OR_TierConfig){false, 1.00f, 1.00f, 0.00f, 1.00f, 1.00f, 1.00f};
@@ -123,7 +125,7 @@ bool or_config_validate(OR_Config *config) {
     config->journey_probability_multiplier = or_clamp(config->journey_probability_multiplier, 0.50f, 2.00f);
 
     for (i = 0; i < OR_MODE_COUNT; ++i) {
-        config->modes[i].elite_chance = or_clamp(config->modes[i].elite_chance, 0.0f, 0.95f);
+        config->modes[i].elite_chance = or_clamp(config->modes[i].elite_chance, 0.0f, 1.0f);
         config->modes[i].life_multiplier = or_positive(config->modes[i].life_multiplier, 1.0f);
         config->modes[i].damage_multiplier = or_positive(config->modes[i].damage_multiplier, 1.0f);
         config->modes[i].defense_multiplier = or_positive(config->modes[i].defense_multiplier, 1.0f);
