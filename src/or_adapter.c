@@ -50,12 +50,23 @@ static bool field_read(patch_handle_t field, patch_handle_t instance, void *out)
     if (!handle_valid(field) || !out || !patchlib_field_get_value) return false;
 #if defined(__ANDROID__)
     if (!instance && patchlib_field_is_static && patchlib_field_is_static(field) &&
+        patchlib_field_is_const && patchlib_field_is_const(field)) {
+        patchlib_field_get_value(field, NULL, out);
+        return true;
+    }
+    if (!instance && patchlib_field_is_static && patchlib_field_is_static(field) &&
+        patchlib_field_is_thread_static && patchlib_field_is_thread_static(field)) {
+        patchlib_field_get_value(field, NULL, out);
+        return true;
+    }
+    if (!instance && patchlib_field_is_static && patchlib_field_is_static(field) &&
         patchlib_field_get_pointer && patchlib_field_get_size) {
         void *raw = patchlib_field_get_pointer(field, NULL);
         size_t size = patchlib_field_get_size(field);
-        if (!raw || size == 0u) return false;
-        memcpy(out, raw, size);
-        return true;
+        if (raw && size != 0u) {
+            memcpy(out, raw, size);
+            return true;
+        }
     }
 #endif
     patchlib_field_get_value(field, instance, out);
@@ -66,12 +77,21 @@ static bool field_write(patch_handle_t field, patch_handle_t instance, void *val
     if (!handle_valid(field) || !value || !patchlib_field_set_value) return false;
 #if defined(__ANDROID__)
     if (!instance && patchlib_field_is_static && patchlib_field_is_static(field) &&
+        patchlib_field_is_const && patchlib_field_is_const(field)) {
+        return false;
+    }
+    if (!instance && patchlib_field_is_static && patchlib_field_is_static(field) &&
+        patchlib_field_is_thread_static && patchlib_field_is_thread_static(field)) {
+        return false;
+    }
+    if (!instance && patchlib_field_is_static && patchlib_field_is_static(field) &&
         patchlib_field_get_pointer && patchlib_field_get_size) {
         void *raw = patchlib_field_get_pointer(field, NULL);
         size_t size = patchlib_field_get_size(field);
-        if (!raw || size == 0u) return false;
-        memcpy(raw, value, size);
-        return true;
+        if (raw && size != 0u) {
+            memcpy(raw, value, size);
+            return true;
+        }
     }
 #endif
     patchlib_field_set_value(field, instance, value);
@@ -242,7 +262,6 @@ static bool read_vanilla_stats(patch_handle_t instance,
     float value = 0.0f;
     bool local_active = false;
     if (!g_adapter.runtime || !stats || !npc_type ||
-        !read_bool(g_adapter.runtime->field_active, instance, &local_active) ||
         !read_i32(g_adapter.runtime->field_type, instance, &type) ||
         !read_i32(g_adapter.runtime->field_life_max, instance, &life_max) ||
         !read_i32(g_adapter.runtime->field_life, instance, &life) ||
@@ -253,6 +272,10 @@ static bool read_vanilla_stats(patch_handle_t instance,
         !read_float(g_adapter.runtime->field_value, instance, &value)) {
         return false;
     }
+    /* SetDefaults is the verified activation boundary on the target mobile
+     * build; active may still be false during that method. AI will re-check it
+     * after the object enters the live pool. */
+    (void)read_bool(g_adapter.runtime->field_active, instance, &local_active);
     (void)read_float(g_adapter.runtime->field_npc_slots, instance, &slots);
     if (is_boss) *is_boss = false;
     if (is_town) *is_town = false;
@@ -260,7 +283,7 @@ static bool read_vanilla_stats(patch_handle_t instance,
     (void)read_bool(g_adapter.runtime->field_boss, instance, is_boss);
     (void)read_bool(g_adapter.runtime->field_town_npc, instance, is_town);
     (void)read_bool(g_adapter.runtime->field_friendly, instance, is_friendly);
-    *active = local_active;
+    if (active) *active = local_active;
     *npc_type = type > 0 ? (uint32_t)type : 0u;
     stats->life_max = life_max > 0 ? life_max : 0;
     stats->life_current = life > 0 ? life : 0;
@@ -277,7 +300,21 @@ static bool apply_final_stats(patch_handle_t instance, const OR_FinalStats *stat
     bool ok = true;
     int32_t i32;
     float f32;
+    int32_t width = 0;
+    int32_t height = 0;
+    float vanilla_scale = 1.0f;
+    bool have_body = false;
     if (!g_adapter.runtime || !stats) return false;
+    /* Capture the vanilla body values before writing the final scale.  Reading
+     * scale after the write would make the ratio 1.0 and silently cancel the
+     * width/height growth. */
+    if (g_adapter.runtime->field_width && g_adapter.runtime->field_height &&
+        read_i32(g_adapter.runtime->field_width, instance, &width) &&
+        read_i32(g_adapter.runtime->field_height, instance, &height) &&
+        read_float(g_adapter.runtime->field_scale, instance, &vanilla_scale) &&
+        vanilla_scale > 0.0f && isfinite(vanilla_scale)) {
+        have_body = true;
+    }
     i32 = clamp_i32(stats->life_max);
     ok = field_write(g_adapter.runtime->field_life_max, instance, &i32) && ok;
     i32 = clamp_i32(stats->life_current);
@@ -292,11 +329,92 @@ static bool apply_final_stats(patch_handle_t instance, const OR_FinalStats *stat
     ok = field_write(g_adapter.runtime->field_scale, instance, &f32) && ok;
     f32 = clamp_float(stats->money);
     ok = field_write(g_adapter.runtime->field_value, instance, &f32) && ok;
+    if (have_body && stats->scale > 0.0f) {
+        double body_ratio = (double)stats->scale / (double)vanilla_scale;
+        width = clamp_i32((int64_t)llround((double)width * body_ratio));
+        height = clamp_i32((int64_t)llround((double)height * body_ratio));
+        ok = field_write(g_adapter.runtime->field_width, instance, &width) && ok;
+        ok = field_write(g_adapter.runtime->field_height, instance, &height) && ok;
+    }
     if (g_adapter.runtime->field_npc_slots) {
         f32 = clamp_float(stats->npc_slots);
         ok = field_write(g_adapter.runtime->field_npc_slots, instance, &f32) && ok;
     }
     return ok;
+}
+
+static bool commit_elite_from_baseline(patch_handle_t instance,
+                                       OR_NativeBinding *binding,
+                                       const OR_VanillaStats *vanilla,
+                                       uint32_t npc_type,
+                                       bool is_boss,
+                                       bool is_town,
+                                       bool is_friendly) {
+    OR_SpawnContext context;
+    OR_SpawnResult spawn;
+    OR_ProgressStage progress;
+    OR_GameMode mode;
+    bool single_player = false;
+    uint64_t session;
+    uint64_t tick;
+    const OR_EliteRecord *record;
+    if (!binding || !vanilla || !g_adapter.runtime || !g_adapter.config ||
+        !g_adapter.state || binding->roll_resolved) return false;
+    /* A failed attempt is final for this native lifecycle. This is what keeps
+     * a 100% test setting from turning one object into multiple generations. */
+    binding->roll_resolved = true;
+    if (!host_authority(&single_player)) return false;
+    progress = current_progress();
+    mode = current_mode();
+    session = world_session_id();
+    tick = update_tick();
+    memset(&context, 0, sizeof(context));
+    context.world_session_id = session;
+    context.world_rule_seed = session;
+    context.spawn_tick = tick;
+    context.npc_slot = (int32_t)(binding - g_adapter.bindings);
+    context.npc_type = npc_type;
+    /* SetDefaults has completed successfully, so it is a valid activation
+     * point even if NPC.active is not set until after the call returns. */
+    context.npc_active = true;
+    context.host_authority = true;
+    context.single_player = single_player;
+    context.is_boss = is_boss;
+    context.is_town_npc = is_town;
+    context.is_friendly = is_friendly;
+    context.is_dummy = false;
+    context.is_segment = false;
+    context.source = OR_SPAWN_NORMAL;
+    context.progress = progress;
+    context.mode = mode;
+    context.terrain = (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE};
+    context.weather = OR_WEATHER_CLEAR;
+    context.is_night = false;
+    context.archetype = OR_AI_ARCHETYPE_MELEE;
+    context.max_active_elites = g_adapter.config->max_active_elites;
+    context.vanilla = *vanilla;
+    memset(&spawn, 0, sizeof(spawn));
+    if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
+                             session ^ (uint64_t)(uintptr_t)instance ^ tick, &spawn) ||
+        !spawn.committed) return false;
+    binding->elite = true;
+    binding->key = spawn.key;
+    binding->previous_life_ratio = vanilla->life_max > 0
+        ? (float)vanilla->life_current / (float)vanilla->life_max : 1.0f;
+    if (!isfinite(binding->previous_life_ratio) || binding->previous_life_ratio < 0.0f) {
+        binding->previous_life_ratio = 1.0f;
+    }
+    or_ai_runtime_init(&binding->ai_runtime);
+    record = or_state_find_const(g_adapter.state, binding->key);
+    if (!record) return false;
+    if (!apply_final_stats(instance, &record->final_stats)) {
+        OR_LOG(MOD_LOG_LEVEL_WARNING, "Elite committed but native stat write was incomplete: type=%u",
+               (unsigned)npc_type);
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
+           (unsigned)npc_type, or_elite_tier_name(spawn.tier),
+           or_progress_stage_name(progress), or_game_mode_name(mode));
+    return true;
 }
 
 static void setdefaults_postfix(patch_handle_t instance, void **args, void *result,
@@ -319,13 +437,23 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     binding->loot_seen = false;
     binding->ai_ticks = 0u;
     or_ai_runtime_init(&binding->ai_runtime);
+    {
+        OR_VanillaStats vanilla;
+        uint32_t npc_type = 0;
+        bool is_boss = false;
+        bool is_town = false;
+        bool is_friendly = false;
+        if (read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
+                               &is_friendly, NULL)) {
+            (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
+                                             is_boss, is_town, is_friendly);
+        }
+    }
 }
 
 static void ai_postfix(patch_handle_t instance, void **args, void *result,
                        const patch_method_signature_t *sig_info) {
     OR_NativeBinding *binding;
-    OR_SpawnContext context;
-    OR_SpawnResult spawn;
     OR_VanillaStats vanilla;
     uint32_t npc_type = 0;
     bool is_boss = false;
@@ -333,10 +461,6 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
     bool is_friendly = false;
     bool active = false;
     bool single_player = false;
-    OR_ProgressStage progress;
-    OR_GameMode mode;
-    uint64_t tick;
-    uint64_t session;
     float current_ratio;
     const OR_EliteRecord *record;
     (void)args;
@@ -347,7 +471,7 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
     if (!binding) return;
     if (!read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
                             &is_friendly, &active)) return;
-    if (!active) {
+    if (!active && !binding->elite) {
         clear_binding(binding);
         return;
     }
@@ -378,55 +502,8 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
     if (binding->roll_resolved) return;
     /* Resolve the random outcome once per SetDefaults -> AI lifecycle. This
      * prevents every AI tick from rerolling a rejected or accepted elite. */
-    binding->roll_resolved = true;
-    if (!host_authority(&single_player)) return;
-    progress = current_progress();
-    mode = current_mode();
-    session = world_session_id();
-    tick = update_tick();
-    memset(&context, 0, sizeof(context));
-    context.world_session_id = session;
-    context.world_rule_seed = session;
-    context.spawn_tick = tick;
-    context.npc_slot = (int32_t)(binding - g_adapter.bindings);
-    context.npc_type = npc_type;
-    context.npc_active = active;
-    context.host_authority = true;
-    context.single_player = single_player;
-    context.is_boss = is_boss;
-    context.is_town_npc = is_town;
-    context.is_friendly = is_friendly;
-    context.is_dummy = false;
-    context.is_segment = false;
-    context.source = OR_SPAWN_NORMAL;
-    context.progress = progress;
-    context.mode = mode;
-    context.terrain = (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE};
-    context.weather = OR_WEATHER_CLEAR;
-    context.is_night = false;
-    context.archetype = OR_AI_ARCHETYPE_MELEE;
-    context.max_active_elites = g_adapter.config->max_active_elites;
-    context.vanilla = vanilla;
-    memset(&spawn, 0, sizeof(spawn));
-    if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
-                             session ^ (uint64_t)(uintptr_t)instance ^ tick, &spawn) ||
-        !spawn.committed) return;
-    binding->elite = true;
-    binding->key = spawn.key;
-    binding->previous_life_ratio = vanilla.life_max > 0
-        ? (float)vanilla.life_current / (float)vanilla.life_max : 1.0f;
-    if (!isfinite(binding->previous_life_ratio) || binding->previous_life_ratio < 0.0f) {
-        binding->previous_life_ratio = 1.0f;
-    }
-    or_ai_runtime_init(&binding->ai_runtime);
-    record = or_state_find_const(g_adapter.state, binding->key);
-    if (!record || !apply_final_stats(instance, &record->final_stats)) {
-        OR_LOG(MOD_LOG_LEVEL_WARNING, "Elite committed but native stat write was incomplete: type=%u",
-               (unsigned)npc_type);
-    }
-    OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
-           (unsigned)npc_type, or_elite_tier_name(spawn.tier),
-           or_progress_stage_name(progress), or_game_mode_name(mode));
+    (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
+                                     is_boss, is_town, is_friendly);
 }
 
 static void loot_postfix(patch_handle_t instance, void **args, void *result,

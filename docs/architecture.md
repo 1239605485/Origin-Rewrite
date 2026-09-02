@@ -11,9 +11,9 @@ The native adapter owns only observation and application:
 - report a verified death/loot ordering.
 
 The Android adapter currently uses the verified Terraria 1.4.5.6.4 entry
-points: `NPC.SetDefaults` for lifecycle reset, parameterless `NPC.AI()` for the
-first activation decision and AI ticking, and parameterless `NPC.NPCLoot()` for
-the post-vanilla reward boundary. `AI()` has a documented target-version
+points: `NPC.SetDefaults` for the post-vanilla activation decision and stat
+commit, parameterless `NPC.AI()` for the state-machine tick, and parameterless
+`NPC.NPCLoot()` for the post-vanilla reward boundary. `AI()` has a documented target-version
 exception: older PatchLib metadata may expose a hidden MethodInfo argument even
 though the known dispatcher is safe to hook on the reference mobile build.
 

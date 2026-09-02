@@ -34,6 +34,8 @@ typedef struct OR_Runtime {
     patch_handle_t field_scale;
     patch_handle_t field_value;
     patch_handle_t field_npc_slots;
+    patch_handle_t field_width;
+    patch_handle_t field_height;
     patch_handle_t field_type;
     patch_handle_t field_friendly;
     patch_handle_t field_town_npc;

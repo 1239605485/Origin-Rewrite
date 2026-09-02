@@ -244,6 +244,8 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     runtime->field_scale = or_resolve_field(runtime->npc_type, "scale", true, PATCH_FLOAT, sizeof(float));
     runtime->field_value = or_resolve_field(runtime->npc_type, "value", true, PATCH_FLOAT, sizeof(float));
     runtime->field_npc_slots = or_resolve_field(runtime->npc_type, "npcSlots", true, PATCH_FLOAT, sizeof(float));
+    runtime->field_width = or_resolve_field(runtime->npc_type, "width", true, PATCH_INT32, sizeof(int32_t));
+    runtime->field_height = or_resolve_field(runtime->npc_type, "height", true, PATCH_INT32, sizeof(int32_t));
     runtime->field_type = or_resolve_field(runtime->npc_type, "type", true, PATCH_INT32, sizeof(int32_t));
     runtime->field_friendly = or_resolve_field(runtime->npc_type, "friendly", true, PATCH_BOOL, sizeof(bool));
     runtime->field_town_npc = or_resolve_field(runtime->npc_type, "townNPC", true, PATCH_BOOL, sizeof(bool));
@@ -324,6 +326,8 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->field_scale);
     or_release_handle(runtime->field_value);
     or_release_handle(runtime->field_npc_slots);
+    or_release_handle(runtime->field_width);
+    or_release_handle(runtime->field_height);
     or_release_handle(runtime->field_type);
     or_release_handle(runtime->field_friendly);
     or_release_handle(runtime->field_town_npc);
