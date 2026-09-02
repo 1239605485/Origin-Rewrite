@@ -188,12 +188,14 @@ static uint64_t update_tick(void) {
     return ++g_adapter.fallback_tick;
 }
 
-static bool host_authority(bool *single_player) {
+static bool host_authority(bool *single_player, bool *known) {
     int32_t net_mode = -1;
     if (single_player) *single_player = false;
+    if (known) *known = false;
     if (!g_adapter.runtime || !read_i32(g_adapter.runtime->main_net_mode, NULL, &net_mode)) {
         return false;
     }
+    if (known) *known = true;
     if (single_player) *single_player = net_mode == 0;
     return net_mode == 0 || net_mode == 2;
 }
@@ -355,15 +357,21 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     OR_ProgressStage progress;
     OR_GameMode mode;
     bool single_player = false;
+    bool authority_known = false;
     uint64_t session;
     uint64_t tick;
     const OR_EliteRecord *record;
     if (!binding || !vanilla || !g_adapter.runtime || !g_adapter.config ||
         !g_adapter.state || binding->roll_resolved) return false;
-    /* A failed attempt is final for this native lifecycle. This is what keeps
-     * a 100% test setting from turning one object into multiple generations. */
+    /* Do not consume the lifecycle until the host/client decision is known.
+     * On Android, a static Main field can be unavailable during SetDefaults;
+     * AI must be allowed to retry once the runtime has finished initializing.
+     * A known non-host is still resolved immediately and never mutates state. */
+    if (!host_authority(&single_player, &authority_known)) {
+        if (authority_known) binding->roll_resolved = true;
+        return false;
+    }
     binding->roll_resolved = true;
-    if (!host_authority(&single_player)) return false;
     progress = current_progress();
     mode = current_mode();
     session = world_session_id();
@@ -486,7 +494,7 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
             ? (float)vanilla.life_current / (float)vanilla.life_max : 0.0f;
         if (!isfinite(current_ratio) || current_ratio < 0.0f) current_ratio = 0.0f;
         if (current_ratio > 1.0f) current_ratio = 1.0f;
-        if (host_authority(&single_player)) {
+        if (host_authority(&single_player, NULL)) {
             (void)or_ai_tick(&record->ai_plan, &binding->ai_runtime,
                              (uint32_t)binding->ai_ticks);
             if (or_ai_try_trigger_rage(&record->ai_plan, &binding->ai_runtime,
@@ -520,7 +528,7 @@ static void loot_postfix(patch_handle_t instance, void **args, void *result,
     binding = find_binding(instance);
     if (!binding || !binding->elite || binding->loot_seen) return;
     binding->loot_seen = true;
-    if (!host_authority(&single_player)) return;
+    if (!host_authority(&single_player, NULL)) return;
     record = or_state_find_const(g_adapter.state, binding->key);
     if (!record) {
         clear_binding(binding);
