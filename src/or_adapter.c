@@ -223,19 +223,24 @@ static uint64_t update_tick(void) {
 }
 
 static bool host_authority(bool *single_player, bool *known) {
-    int32_t net_mode = -1;
+    int32_t net_mode = 0;
     if (single_player) *single_player = false;
     if (known) *known = false;
-    if (!g_adapter.runtime || !read_i32(g_adapter.runtime->main_net_mode, NULL, &net_mode)) {
+    if (g_adapter.runtime && g_adapter.runtime->main_net_mode) {
+        (void)read_i32(g_adapter.runtime->main_net_mode, NULL, &net_mode);
+    }
+    /* SetDefaults is also the proven local stat boundary.  PatchLib's static
+     * getter is void and may not populate an optional Main field on some
+     * Android builds.  Treat every value except Terraria's explicit client
+     * value (1) as local/authoritative, matching the working reference mod;
+     * an unknown read must never disable the core stat overlay. */
+    if (net_mode == 1) {
+        if (known) *known = true;
         return false;
     }
-    /* The field API has a void getter, so an unavailable Android static read
-     * can leave the sentinel value unchanged. Only Terraria's documented
-     * 0/1/2 values count as a known network state. */
-    if (net_mode < 0 || net_mode > 2) return false;
-    if (known) *known = true;
-    if (single_player) *single_player = net_mode == 0;
-    return net_mode == 0 || net_mode == 2;
+    if (known) *known = net_mode == 0 || net_mode == 2;
+    if (single_player) *single_player = net_mode != 2;
+    return true;
 }
 
 static OR_GameMode current_mode(void) {
