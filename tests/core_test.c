@@ -39,7 +39,11 @@ static void test_config_and_stats(void) {
 
     or_config_default(&config);
     CHECK(or_config_validate(&config));
-    CHECK(config.modes[OR_MODE_CLASSIC].elite_chance == 1.0f);
+    CHECK(config.modes[OR_MODE_CLASSIC].elite_chance == 0.20f);
+    CHECK(config.modes[OR_MODE_EXPERT].elite_chance == 0.30f);
+    CHECK(config.modes[OR_MODE_MASTER].elite_chance == 0.40f);
+    CHECK(config.modes[OR_MODE_ZENITH].elite_chance == 0.50f);
+    CHECK(config.modes[OR_MODE_JOURNEY].elite_chance == 0.20f);
     CHECK(config.max_active_elites == 8u);
     CHECK(config.progress[OR_PROGRESS_PRE_HARDMODE].tier_weight[OR_MODE_CLASSIC][OR_TIER_APOCALYPSE] == 0.0f);
     CHECK(config.progress[OR_PROGRESS_HARDMODE_PRE_MECH].tier_weight[OR_MODE_CLASSIC][OR_TIER_APOCALYPSE] > 0.0f);
@@ -233,6 +237,10 @@ static void test_spawn_authority(void) {
 
     or_config_default(&config);
     CHECK(or_config_validate(&config));
+    /* This transaction test isolates commit/state behavior. Formal runtime
+     * probabilities are tested above; use a local guaranteed-roll copy here
+     * so the test does not depend on a particular PRNG seed. */
+    config.modes[OR_MODE_CLASSIC].elite_chance = 1.0f;
     or_state_store_init(&store);
     memset(&context, 0, sizeof(context));
     context.world_session_id = 1;

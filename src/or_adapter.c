@@ -410,89 +410,6 @@ static bool apply_final_stats(patch_handle_t instance, const OR_FinalStats *stat
     return ok;
 }
 
-/* Temporary diagnostic path. The verified reference mod proves the mobile
- * boundary by writing lifeMax/life immediately from SetDefaults. Keep this
- * small overlay before the state transaction so a failure in the richer
- * elite-state pipeline cannot hide a Hook/field-write failure during the
- * 100%-chance test build. It is active only while the configured chance is
- * exactly 100%; remove it when the mobile callback has been confirmed. */
-static void apply_reference_test_overlay(patch_handle_t instance,
-                                         const OR_VanillaStats *vanilla,
-                                         OR_ProgressStage progress,
-                                         OR_GameMode mode) {
-    OR_GameMode stats_mode;
-    const OR_ProgressConfig *progress_config;
-    const OR_ModeConfig *mode_config;
-    double life_multiplier;
-    double damage_multiplier;
-    int32_t life_max;
-    int32_t life_current;
-    int32_t damage;
-    int32_t defense;
-    if (!instance || !vanilla || !g_adapter.config ||
-        progress < OR_PROGRESS_PRE_HARDMODE || progress >= OR_PROGRESS_COUNT ||
-        mode < OR_MODE_CLASSIC || mode >= OR_MODE_COUNT) return;
-    stats_mode = or_config_effective_stats_mode(mode);
-    progress_config = &g_adapter.config->progress[progress];
-    mode_config = &g_adapter.config->modes[stats_mode];
-    life_multiplier = (double)progress_config->life_multiplier[OR_TIER_ALTERED] *
-                      (double)mode_config->life_multiplier;
-    damage_multiplier = (double)progress_config->damage_multiplier[OR_TIER_ALTERED] *
-                        (double)mode_config->damage_multiplier;
-    life_max = clamp_i32((int64_t)llround((double)vanilla->life_max * life_multiplier));
-    life_current = vanilla->life_max > 0 && vanilla->life_current > 0
-        ? clamp_i32((int64_t)llround((double)life_max *
-                                     (double)vanilla->life_current /
-                                     (double)vanilla->life_max))
-        : life_max;
-    damage = clamp_i32((int64_t)llround((double)vanilla->damage * damage_multiplier));
-    defense = clamp_i32((int64_t)llround((double)vanilla->defense *
-                                         (double)progress_config->defense_multiplier[OR_TIER_ALTERED] *
-                                         (double)mode_config->defense_multiplier) +
-                        (int64_t)progress_config->defense_flat[OR_TIER_ALTERED]);
-    (void)field_write(g_adapter.runtime->field_life_max, instance, &life_max);
-    (void)field_write(g_adapter.runtime->field_life, instance, &life_current);
-    if (g_adapter.runtime->field_damage) {
-        (void)field_write(g_adapter.runtime->field_damage, instance, &damage);
-    }
-    if (g_adapter.runtime->field_defense) {
-        (void)field_write(g_adapter.runtime->field_defense, instance, &defense);
-    }
-    OR_DIAG_LOG("reference_overlay typeLife=%lld->%d life=%d damage=%d defense=%d",
-                (long long)vanilla->life_max, life_max, life_current, damage, defense);
-}
-
-/* Absolute minimum callback probe. This intentionally does not depend on
- * NPC.type, active, boss/friendly flags, world progress, mode, probability,
- * state storage, AI, networking, or loot. It is used only by the 100%-chance
- * diagnostic build, so a normal NPC SetDefaults callback must visibly change
- * lifeMax/life even if a higher-level compatibility check is incomplete. */
-static void apply_minimal_life_probe(patch_handle_t instance) {
-    int32_t vanilla_life_max = 0;
-    int32_t vanilla_life = 0;
-    int32_t probe_life_max;
-    int32_t probe_life;
-    int32_t readback_life_max = -1;
-    int32_t readback_life = -1;
-    bool max_ok;
-    bool life_ok;
-    if (!instance || !g_adapter.runtime || !g_adapter.config ||
-        g_adapter.config->modes[OR_MODE_CLASSIC].elite_chance < 0.999f ||
-        !read_i32(g_adapter.runtime->field_life_max, instance, &vanilla_life_max) ||
-        vanilla_life_max <= 0) return;
-    if (!read_i32(g_adapter.runtime->field_life, instance, &vanilla_life) ||
-        vanilla_life <= 0) vanilla_life = vanilla_life_max;
-    probe_life_max = clamp_i32((int64_t)llround((double)vanilla_life_max * 1.25));
-    probe_life = clamp_i32((int64_t)llround((double)vanilla_life * 1.25));
-    max_ok = field_write(g_adapter.runtime->field_life_max, instance, &probe_life_max);
-    life_ok = field_write(g_adapter.runtime->field_life, instance, &probe_life);
-    (void)read_i32(g_adapter.runtime->field_life_max, instance, &readback_life_max);
-    (void)read_i32(g_adapter.runtime->field_life, instance, &readback_life);
-    OR_DIAG_LOG("minimal_life_probe vanilla=%d/%d write=%s/%s readback=%d/%d",
-                vanilla_life, vanilla_life_max, max_ok ? "ok" : "fail",
-                life_ok ? "ok" : "fail", readback_life, readback_life_max);
-}
-
 static bool commit_elite_from_baseline(patch_handle_t instance,
                                        OR_NativeBinding *binding,
                                        const OR_VanillaStats *vanilla,
@@ -514,10 +431,6 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         !g_adapter.state || binding->roll_resolved) return false;
     progress = current_progress();
     mode = current_mode();
-    if (!is_boss && !is_town && !is_friendly &&
-        g_adapter.config->modes[mode].elite_chance >= 0.999f) {
-        apply_reference_test_overlay(instance, vanilla, progress, mode);
-    }
     /* A known multiplayer client must not mutate the authoritative state. If
      * Main.netMode is unavailable, keep the reference mod's SetDefaults
      * behavior and allow the local stat overlay; this optional field must not
@@ -678,7 +591,6 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
      * lifecycle flag; the reference implementation applies its overlay as
      * soon as this postfix runs. */
     if (!instance || !g_adapter.runtime || !g_adapter.config || !g_adapter.state) return;
-    apply_minimal_life_probe(instance);
     binding = get_or_create_binding(instance);
     if (!binding) return;
     /* A new SetDefaults lifecycle invalidates any state left by a reused
