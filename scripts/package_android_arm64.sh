@@ -46,10 +46,14 @@ cp "$library_path" "$stage_dir/Resources/lib/libOriginRewrite.android.arm64.so"
 mkdir -p "$(dirname "$output_zip")"
 (cd "$stage_dir" && zip -qr -FS "$output_zip" .)
 
-test "$(unzip -Z1 "$output_zip" | rg -c '^Manifest\.json$')" -eq 1
-test "$(unzip -Z1 "$output_zip" | rg -c '^Info\.json$')" -eq 1
-test "$(unzip -Z1 "$output_zip" | rg -c '^OriginRewrite\.json$')" -eq 1
-test "$(unzip -Z1 "$output_zip" | rg -c '^Resources/lib/libOriginRewrite\.android\.arm64\.so$')" -eq 1
+entry_count() {
+    unzip -Z1 "$output_zip" | grep -Fxc -- "$1" || true
+}
+
+test "$(entry_count 'Manifest.json')" -eq 1
+test "$(entry_count 'Info.json')" -eq 1
+test "$(entry_count 'OriginRewrite.json')" -eq 1
+test "$(entry_count 'Resources/lib/libOriginRewrite.android.arm64.so')" -eq 1
 
 echo "Installable Android ARM64 package: $output_zip"
 unzip -l "$output_zip"
