@@ -1,0 +1,27 @@
+{
+  "pkgId": "li06.originrewrite",
+  "name": "Origin Rewrite（起源重构）",
+  "author": "liuxin",
+  "version": "0.1.1",
+  "versionCode": 2026090201,
+  "brieflyDescribe": "Origin Rewrite Android ARM64 package（起源重构手机版 ARM64 包）",
+  "description": "Data-driven elite NPC overlay with bounded AI and vanilla-only rewards（数据驱动的精英怪状态覆盖层；仅使用目标版本已确认的原版奖励）",
+  "features": [],
+  "sizeCategory": "TINY",
+  "targetGameVersion": "1.4.5.6.4",
+  "minGameVersion": "1.4.4.0",
+  "maxGameVersion": "1.4.5.6.4",
+  "support": {
+    "android": { "arm64": true, "arm": false, "x64": false, "x86": false },
+    "windows": { "arm64": false, "arm": false, "x64": false, "x86": false },
+    "linux": { "arm64": false, "arm": false, "x64": false, "x86": false },
+    "mac": { "arm64": false, "arm": false, "x64": false, "x86": false },
+    "ios": { "arm64": false, "arm": false, "x64": false, "x86": false }
+  },
+  "dependence": [],
+  "conflicts": [],
+  "stableVerified": false,
+  "experimental": true,
+  "deprecated": false,
+  "hasExtendedContent": true
+}
