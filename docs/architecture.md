@@ -32,7 +32,9 @@ The pure core owns all decisions. It never calls PatchLib, allocates native obje
 
 ## Spawn transaction
 
-`or_spawn_try_commit()` is a transaction boundary. It checks authority and exclusions, snapshots rules, rolls the overall chance once, rolls the tier once, computes stats once, then reserves a slot generation and commits the complete state. A failed commit cleans the pending record and does not increment the active elite count.
+`or_spawn_try_commit()` is a transaction boundary. It checks authority and exclusions, snapshots rules, rolls the overall chance once, rolls the tier once, computes stats once, then reserves a slot generation and commits the complete state. During `SetDefaults`, the adapter uses a transient transaction so the returned stat snapshot is applied immediately like the verified reference mod; that temporary state is cleaned before the NPC enters the live pool. A failed commit cleans the pending record and does not increment the active elite count.
+
+The adapter's `SetDefaults` stat overlay is the minimum gameplay gate. The AI hook is optional because target-version metadata can expose a safe-to-run `AI()` dispatcher without exposing a signature that is safe to hook. Missing AI must disable only AI actions, never the already-installed health/damage overlay.
 
 The state table has an independent `active_elites` count. `npcSlots` is returned as a stat for the game's spawn-capacity calculation; it is not used as a substitute for the number of active elite records.
 

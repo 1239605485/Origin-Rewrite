@@ -109,7 +109,8 @@ bool or_spawn_try_commit(const OR_Config *config,
         out_result->reason = OR_SPAWN_REJECT_LIMIT;
         return false;
     }
-    if (or_state_spawn_on_cooldown(store, context->world_session_id, context->npc_slot,
+    if (!context->transient_prepare &&
+        or_state_spawn_on_cooldown(store, context->world_session_id, context->npc_slot,
                                    context->spawn_tick, config->same_npc_cooldown_ticks)) {
         out_result->reason = OR_SPAWN_REJECT_COOLDOWN;
         return false;
@@ -189,7 +190,9 @@ bool or_spawn_try_commit(const OR_Config *config,
         out_result->reason = OR_SPAWN_REJECT_COMMIT_FAILED;
         return false;
     }
-    or_state_note_spawn(store, key);
+    if (!context->transient_prepare) {
+        or_state_note_spawn(store, key);
+    }
 
     out_result->committed = true;
     out_result->reason = OR_SPAWN_ACCEPTED;

@@ -52,9 +52,11 @@ typedef struct OR_NativeBinding {
     bool occupied;
     bool roll_resolved;
     bool elite;
+    bool prepared;
     bool loot_seen;
     patch_handle_t instance;
     OR_InstanceKey key;
+    OR_EliteRecord prepared_record;
     OR_AiRuntimeState ai_runtime;
     uint64_t ai_ticks;
     float previous_life_ratio;
@@ -313,24 +315,17 @@ static bool read_vanilla_stats(patch_handle_t instance,
         if (failed_field) *failed_field = "lifeMax";
         return false;
     }
-    if (!read_i32(g_adapter.runtime->field_life, instance, &life)) {
-        if (failed_field) *failed_field = "life";
+    if (!read_i32(g_adapter.runtime->field_life, instance, &life)) life = life_max;
+    (void)read_i32(g_adapter.runtime->field_damage, instance, &damage);
+    (void)read_i32(g_adapter.runtime->field_defense, instance, &defense);
+    (void)read_float(g_adapter.runtime->field_knockback_resist, instance, &knockback);
+    (void)read_float(g_adapter.runtime->field_scale, instance, &scale);
+    if (type <= 0) {
+        if (failed_field) *failed_field = "type_value";
         return false;
     }
-    if (!read_i32(g_adapter.runtime->field_damage, instance, &damage)) {
-        if (failed_field) *failed_field = "damage";
-        return false;
-    }
-    if (!read_i32(g_adapter.runtime->field_defense, instance, &defense)) {
-        if (failed_field) *failed_field = "defense";
-        return false;
-    }
-    if (!read_float(g_adapter.runtime->field_knockback_resist, instance, &knockback)) {
-        if (failed_field) *failed_field = "knockBackResist";
-        return false;
-    }
-    if (!read_float(g_adapter.runtime->field_scale, instance, &scale)) {
-        if (failed_field) *failed_field = "scale";
+    if (life_max <= 0) {
+        if (failed_field) *failed_field = "lifeMax_value";
         return false;
     }
     /* SetDefaults is the verified activation boundary on the target mobile
@@ -382,13 +377,21 @@ static bool apply_final_stats(patch_handle_t instance, const OR_FinalStats *stat
     i32 = clamp_i32(stats->life_current);
     ok = field_write(g_adapter.runtime->field_life, instance, &i32) && ok;
     i32 = stats->damage < 0 ? 0 : stats->damage;
-    ok = field_write(g_adapter.runtime->field_damage, instance, &i32) && ok;
+    if (g_adapter.runtime->field_damage) {
+        ok = field_write(g_adapter.runtime->field_damage, instance, &i32) && ok;
+    }
     i32 = stats->defense < 0 ? 0 : stats->defense;
-    ok = field_write(g_adapter.runtime->field_defense, instance, &i32) && ok;
+    if (g_adapter.runtime->field_defense) {
+        ok = field_write(g_adapter.runtime->field_defense, instance, &i32) && ok;
+    }
     f32 = stats->knockback_resist;
-    ok = field_write(g_adapter.runtime->field_knockback_resist, instance, &f32) && ok;
+    if (g_adapter.runtime->field_knockback_resist) {
+        ok = field_write(g_adapter.runtime->field_knockback_resist, instance, &f32) && ok;
+    }
     f32 = clamp_float(stats->scale);
-    ok = field_write(g_adapter.runtime->field_scale, instance, &f32) && ok;
+    if (g_adapter.runtime->field_scale) {
+        ok = field_write(g_adapter.runtime->field_scale, instance, &f32) && ok;
+    }
     f32 = clamp_float(stats->money);
     if (g_adapter.runtime->field_value) {
         ok = field_write(g_adapter.runtime->field_value, instance, &f32) && ok;
@@ -413,7 +416,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                                        uint32_t npc_type,
                                        bool is_boss,
                                        bool is_town,
-                                       bool is_friendly) {
+                                       bool is_friendly,
+                                       bool native_active) {
     OR_SpawnContext context;
     OR_SpawnResult spawn;
     OR_ProgressStage progress;
@@ -471,7 +475,9 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
      * consume all slots before the first visible enemy is spawned. The cap
      * belongs to a real active-spawn boundary; this verified direct hook must
      * retain enough state slots to apply the stat overlay consistently. */
-    context.max_active_elites = OR_MAX_TRACKED_NPCS;
+    context.max_active_elites = native_active
+        ? g_adapter.config->max_active_elites : OR_MAX_TRACKED_NPCS;
+    context.transient_prepare = !native_active;
     context.vanilla = *vanilla;
     memset(&spawn, 0, sizeof(spawn));
     if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
@@ -482,18 +488,26 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                     or_spawn_reject_reason_name(spawn.reason));
         return false;
     }
-    binding->elite = true;
-    binding->key = spawn.key;
+    binding->elite = native_active;
+    binding->prepared = !native_active;
+    if (native_active) binding->key = spawn.key;
     binding->previous_life_ratio = vanilla->life_max > 0
         ? (float)vanilla->life_current / (float)vanilla->life_max : 1.0f;
     if (!isfinite(binding->previous_life_ratio) || binding->previous_life_ratio < 0.0f) {
         binding->previous_life_ratio = 1.0f;
     }
     or_ai_runtime_init(&binding->ai_runtime);
-    record = or_state_find_const(g_adapter.state, binding->key);
+    record = or_state_find_const(g_adapter.state, spawn.key);
     if (!record) {
         OR_DIAG_LOG("record_missing type=%u", (unsigned)npc_type);
         return false;
+    }
+    if (!native_active) {
+        binding->prepared_record = *record;
+        (void)or_state_cleanup(g_adapter.state, spawn.key);
+        record = &binding->prepared_record;
+    } else {
+        binding->key = spawn.key;
     }
     {
         bool write_ok = apply_final_stats(instance, &record->final_stats);
@@ -523,6 +537,49 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     return true;
 }
 
+/* SetDefaults is also used for NPC templates before they enter the live pool.
+ * Their stat overlay must happen immediately like the verified reference mod,
+ * but their AI/loot state must not consume the live-elite store. Attach that
+ * already computed record on the first AI callback after active becomes true. */
+static bool attach_prepared_record(OR_NativeBinding *binding) {
+    OR_EliteRecord *prepared;
+    OR_InstanceKey key;
+    uint32_t active_limit;
+    if (!binding || !binding->prepared || !g_adapter.state || !g_adapter.config) return false;
+    prepared = &binding->prepared_record;
+    active_limit = g_adapter.config->max_active_elites != 0u
+        ? g_adapter.config->max_active_elites : OR_MAX_TRACKED_NPCS;
+    if (or_state_active_count(g_adapter.state) >= active_limit) {
+        OR_DIAG_LOG("attach_fail type=%u reason=active_limit",
+                    (unsigned)prepared->npc_type);
+        return false;
+    }
+    if (!or_state_acquire_pending(g_adapter.state, prepared->key.world_session_id,
+                                  prepared->key.npc_slot, prepared->npc_type,
+                                  prepared->source, prepared->spawn_tick, &key)) {
+        OR_DIAG_LOG("attach_fail type=%u reason=slot_busy",
+                    (unsigned)prepared->npc_type);
+        return false;
+    }
+    if (!or_state_commit_spawn(g_adapter.state, key, prepared->progress,
+                               prepared->mode, prepared->tier, &prepared->vanilla,
+                               &prepared->final_stats, &prepared->rules,
+                               &prepared->ai_plan) ||
+        !or_state_mark_live(g_adapter.state, key)) {
+        (void)or_state_cleanup(g_adapter.state, key);
+        OR_DIAG_LOG("attach_fail type=%u reason=state_commit",
+                    (unsigned)prepared->npc_type);
+        return false;
+    }
+    or_state_note_spawn(g_adapter.state, key);
+    binding->key = key;
+    binding->elite = true;
+    binding->prepared = false;
+    OR_DIAG_LOG("attach_ok type=%u tier=%s", (unsigned)prepared->npc_type,
+                or_elite_tier_name(prepared->tier));
+    return true;
+}
+
 static void setdefaults_postfix(patch_handle_t instance, void **args, void *result,
                                 const patch_method_signature_t *sig_info) {
     OR_NativeBinding *binding;
@@ -549,9 +606,10 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
         bool is_boss = false;
         bool is_town = false;
         bool is_friendly = false;
+        bool active = false;
         const char *failed_field = NULL;
         if (read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
-                               &is_friendly, NULL, &failed_field)) {
+                               &is_friendly, &active, &failed_field)) {
             if (g_adapter.diagnostic_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
                 ++g_adapter.diagnostic_callback_count;
                 OR_DIAG_LOG("setdefaults_callback count=%u type=%u vanillaLife=%lld life=%lld",
@@ -560,7 +618,7 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
                             (long long)vanilla.life_current);
             }
             (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
-                                             is_boss, is_town, is_friendly);
+                                             is_boss, is_town, is_friendly, active);
         } else {
             OR_DIAG_LOG("setdefaults_read_fail field=%s",
                         failed_field ? failed_field : "unknown");
@@ -591,6 +649,26 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
                             &is_friendly, &active, &failed_field)) {
         OR_DIAG_LOG("ai_read_fail field=%s", failed_field ? failed_field : "unknown");
         return;
+    }
+    if (binding->prepared) {
+        if (!active) {
+            /* A real NPC may expose active one or two AI calls after
+             * SetDefaults. Template objects never become active and are
+             * released after this short grace window. */
+            binding->ai_ticks += 1u;
+            if (binding->ai_ticks < 3u) return;
+            clear_binding(binding);
+            return;
+        }
+        if (!attach_prepared_record(binding)) {
+            /* The native stats have already been written at SetDefaults, in
+             * the same boundary used by the verified reference mod. If the
+             * optional state attachment is unavailable, keep that overlay but
+             * do not retry or create duplicate state. */
+            binding->prepared = false;
+            binding->roll_resolved = true;
+            return;
+        }
     }
     if (!active && !binding->elite) {
         clear_binding(binding);
@@ -624,7 +702,7 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
     /* Resolve the random outcome once per SetDefaults -> AI lifecycle. This
      * prevents every AI tick from rerolling a rejected or accepted elite. */
     (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
-                                     is_boss, is_town, is_friendly);
+                                     is_boss, is_town, is_friendly, true);
 }
 
 static void loot_postfix(patch_handle_t instance, void **args, void *result,
@@ -686,8 +764,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     bool any_setdefaults = false;
     if (!runtime || !config || !state || !config->enable_gameplay_hooks ||
         !runtime->capabilities.patchlib_available ||
-        !runtime->capabilities.stats_fields_resolved ||
-        !runtime->method_ai) return false;
+        !runtime->capabilities.stats_fields_resolved) return false;
     memset(&g_adapter, 0, sizeof(g_adapter));
     g_adapter.runtime = runtime;
     g_adapter.config = config;
@@ -717,9 +794,18 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults;
     runtime->capabilities.exact_death_hook_resolved = false;
     runtime->capabilities.exact_loot_hook_resolved = runtime->loot_hook_id != PATCH_HOOK_INVALID_ID;
-    runtime->capabilities.gameplay_enabled = any_setdefaults &&
-        runtime->ai_hook_id != PATCH_HOOK_INVALID_ID;
+    /* SetDefaults is the verified stat-application boundary. AI is an
+     * optional enhancement: an older/mobile metadata layout may expose a
+     * dispatcher that is safe to discover but not safe to hook. Requiring the
+     * AI hook here would disable the already-working SetDefaults overlay and
+     * differs from the verified reference mod. */
+    runtime->capabilities.gameplay_enabled = any_setdefaults;
     g_adapter.installed = runtime->capabilities.gameplay_enabled;
+    OR_DIAG_LOG("adapter_hooks setdefaults=%u ai=%s loot=%s gameplay=%s",
+                (unsigned)runtime->setdefaults_hook_count,
+                runtime->ai_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",
+                runtime->loot_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",
+                g_adapter.installed ? "on" : "off");
     return g_adapter.installed;
 }
 

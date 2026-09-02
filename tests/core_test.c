@@ -264,6 +264,20 @@ static void test_spawn_authority(void) {
     CHECK(or_state_mark_death(&store, result.key));
     CHECK(or_state_claim_loot(&store, result.key));
     CHECK(or_state_cleanup(&store, result.key));
+
+    /* A transient SetDefaults preparation must not create a cooldown entry;
+     * the live state is attached later when AI confirms active=true. */
+    or_state_store_init(&store);
+    context.transient_prepare = true;
+    context.spawn_tick = 100u;
+    CHECK(or_spawn_try_commit(&config, &store, &context, 100u, &result));
+    CHECK(result.committed && result.record.final_stats.life_max > context.vanilla.life_max);
+    CHECK(or_state_cleanup(&store, result.key));
+    context.transient_prepare = false;
+    context.spawn_tick = 101u;
+    CHECK(!or_state_spawn_on_cooldown(&store, context.world_session_id,
+                                      context.npc_slot, context.spawn_tick,
+                                      config.same_npc_cooldown_ticks));
 }
 
 static void test_world_persistence_and_item_gate(void) {

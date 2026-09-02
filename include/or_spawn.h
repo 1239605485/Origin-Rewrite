@@ -45,6 +45,7 @@ typedef struct OR_SpawnContext {
     bool is_night;
     OR_AiArchetype archetype;
     uint32_t max_active_elites;
+    bool transient_prepare;
     OR_VanillaStats vanilla;
 } OR_SpawnContext;
 

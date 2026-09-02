@@ -254,9 +254,7 @@ bool or_runtime_probe(OR_Runtime *runtime) {
 
     /* active and value are optional compatibility/reward fields. The core
      * elite stat overlay only needs the vanilla combat fields below. */
-    fields_ok = runtime->field_life_max && runtime->field_life &&
-                runtime->field_damage && runtime->field_defense && runtime->field_knockback_resist &&
-                runtime->field_scale;
+    fields_ok = runtime->field_type && runtime->field_life_max && runtime->field_life;
     runtime->capabilities.stats_fields_resolved = fields_ok;
 
     main_type = patchlib_type_get_type("Terraria", "Main");
