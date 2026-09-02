@@ -410,6 +410,58 @@ static bool apply_final_stats(patch_handle_t instance, const OR_FinalStats *stat
     return ok;
 }
 
+/* Temporary diagnostic path. The verified reference mod proves the mobile
+ * boundary by writing lifeMax/life immediately from SetDefaults. Keep this
+ * small overlay before the state transaction so a failure in the richer
+ * elite-state pipeline cannot hide a Hook/field-write failure during the
+ * 100%-chance test build. It is active only while the configured chance is
+ * exactly 100%; remove it when the mobile callback has been confirmed. */
+static void apply_reference_test_overlay(patch_handle_t instance,
+                                         const OR_VanillaStats *vanilla,
+                                         OR_ProgressStage progress,
+                                         OR_GameMode mode) {
+    OR_GameMode stats_mode;
+    const OR_ProgressConfig *progress_config;
+    const OR_ModeConfig *mode_config;
+    double life_multiplier;
+    double damage_multiplier;
+    int32_t life_max;
+    int32_t life_current;
+    int32_t damage;
+    int32_t defense;
+    if (!instance || !vanilla || !g_adapter.config ||
+        progress < OR_PROGRESS_PRE_HARDMODE || progress >= OR_PROGRESS_COUNT ||
+        mode < OR_MODE_CLASSIC || mode >= OR_MODE_COUNT) return;
+    stats_mode = or_config_effective_stats_mode(mode);
+    progress_config = &g_adapter.config->progress[progress];
+    mode_config = &g_adapter.config->modes[stats_mode];
+    life_multiplier = (double)progress_config->life_multiplier[OR_TIER_ALTERED] *
+                      (double)mode_config->life_multiplier;
+    damage_multiplier = (double)progress_config->damage_multiplier[OR_TIER_ALTERED] *
+                        (double)mode_config->damage_multiplier;
+    life_max = clamp_i32((int64_t)llround((double)vanilla->life_max * life_multiplier));
+    life_current = vanilla->life_max > 0 && vanilla->life_current > 0
+        ? clamp_i32((int64_t)llround((double)life_max *
+                                     (double)vanilla->life_current /
+                                     (double)vanilla->life_max))
+        : life_max;
+    damage = clamp_i32((int64_t)llround((double)vanilla->damage * damage_multiplier));
+    defense = clamp_i32((int64_t)llround((double)vanilla->defense *
+                                         (double)progress_config->defense_multiplier[OR_TIER_ALTERED] *
+                                         (double)mode_config->defense_multiplier) +
+                        (int64_t)progress_config->defense_flat[OR_TIER_ALTERED]);
+    (void)field_write(g_adapter.runtime->field_life_max, instance, &life_max);
+    (void)field_write(g_adapter.runtime->field_life, instance, &life_current);
+    if (g_adapter.runtime->field_damage) {
+        (void)field_write(g_adapter.runtime->field_damage, instance, &damage);
+    }
+    if (g_adapter.runtime->field_defense) {
+        (void)field_write(g_adapter.runtime->field_defense, instance, &defense);
+    }
+    OR_DIAG_LOG("reference_overlay typeLife=%lld->%d life=%d damage=%d defense=%d",
+                (long long)vanilla->life_max, life_max, life_current, damage, defense);
+}
+
 static bool commit_elite_from_baseline(patch_handle_t instance,
                                        OR_NativeBinding *binding,
                                        const OR_VanillaStats *vanilla,
@@ -429,6 +481,12 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     const OR_EliteRecord *record;
     if (!binding || !vanilla || !g_adapter.runtime || !g_adapter.config ||
         !g_adapter.state || binding->roll_resolved) return false;
+    progress = current_progress();
+    mode = current_mode();
+    if (!is_boss && !is_town && !is_friendly &&
+        g_adapter.config->modes[mode].elite_chance >= 0.999f) {
+        apply_reference_test_overlay(instance, vanilla, progress, mode);
+    }
     /* A known multiplayer client must not mutate the authoritative state. If
      * Main.netMode is unavailable, keep the reference mod's SetDefaults
      * behavior and allow the local stat overlay; this optional field must not
@@ -443,8 +501,6 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         single_player = true;
     }
     binding->roll_resolved = true;
-    progress = current_progress();
-    mode = current_mode();
     session = world_session_id();
     tick = update_tick();
     memset(&context, 0, sizeof(context));

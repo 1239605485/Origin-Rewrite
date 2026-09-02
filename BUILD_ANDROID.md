@@ -26,7 +26,7 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.1.11 诊断版安装后，进入世界并等待生成普通敌怪，再导出 TEFKernel 日志。重点查找
+0.1.12 诊断版安装后，进入世界并等待生成普通敌怪，再导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
