@@ -1,6 +1,6 @@
 # Origin Rewrite｜起源重构
 
-这是基于 v0.4 设计文档的 C11 架构首版。项目采用“原版 NPC + 运行时精英状态”的方式，目标是先把可验证的纯核心逻辑固定下来，再接入手机版 TEFKernel/KernelLoader 的原生 Hook。
+这是基于 v0.4 设计文档的 C11 实现。项目采用“原版 NPC + 运行时精英状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
 本项目区分“源码包”和“手机安装包”：源码包可以包含 CMake、源码和测试；手机安装包必须把 `Manifest.json` 放在 ZIP 根目录，并把已经编译的动态库放在 `Resources/lib/` 下。不能把源码工程目录直接改名后交给 TEFManager。
 
@@ -14,15 +14,16 @@
 - `or_state.c`：`PendingInit → SpawnCommitted → Live → DeathStarted → LootCommitted → Cleanup` 生命周期和 `generationId`。
 - `or_loot.c`：原版掉落保留、单额外奖励槽、阶段奖励分支、金币唯一后端边界。
 - `or_item_registry.c`：只允许显式、已确认的原版物品白名单，拒绝 Boss 袋、Boss 召唤物、未来内容和关键进度物品。
-- `or_runtime.c`：TEFKernel PatchLib 的字段精确检查和方法签名精确检查。
+- `or_runtime.c`：TEFKernel PatchLib 的字段精确检查、方法签名精确检查和移动端目标入口探测。
+- `or_adapter.c`：安装 `NPC.SetDefaults`、无参 `NPC.AI()` 和无参 `NPC.NPCLoot()` 后缀 Hook；按对象指针绑定一次性生成状态，并在槽位复用时清理旧代数。
 - `or_world.c`：世界规则的版本、配置哈希、规则种子和世界种子指纹校验。
 
-首版不会猜测 NPC 生成、死亡或掉落方法签名。`or_runtime_probe()` 只探测可验证的 `Terraria.NPC` 类型和字段；在精确签名没有配置前，`gameplay_enabled` 保持关闭，模组不会修改游戏内 NPC。这是预期的安全门，不是漏写的开关。
+当前版本只安装参考包已验证的目标入口：`SetDefaults` 按参数数量探测实例方法，`AI()` 使用 Terraria 1.4.5.6.4 的已验证移动端兼容路径，`NPCLoot()` 必须通过无参、实例、void 的精确签名校验。任一入口不可用只关闭对应能力，不猜测其他重载。
 
 ## 固定的不变量
 
-1. 原版 `SetDefaults` 只可用于记录待初始化状态，不能抽精英、改属性或增加精英计数。
-2. 只有“非激活→激活”或已验证的实际生成提交点才允许调用 `or_spawn_try_commit()`。
+1. 原版 `SetDefaults` 只重置对象指针对应的当前生命周期；真正抽取和改属性延迟到该对象第一次有效 `AI()` 后缀。
+2. 每个 SetDefaults→AI 生命周期只允许一次 `or_spawn_try_commit()`；失败结果也不会在后续 AI tick 重抽。
 3. 原版难度和种子修正完成后，读取一次最终基准；所有字段从快照重新计算，不能每帧重复乘算。
 4. 传奇（天顶世界）使用独立配置，不再额外叠加大师配置；旅行模式使用普通属性和普通等级权重，再应用独立概率倍率。
 5. 进度 × 精英等级属性表是唯一的阶段属性来源；全局等级配置只保存防御、体型、金币、击退和刷怪占用等通用值。
@@ -78,12 +79,15 @@ OriginRewrite-android-arm64.zip
 
 本工作区未安装 CMake，已用系统 C11 编译器完成纯核心测试和共享库链接检查；vendor API 头文件本身产生的 ISO C pedantic 警告不属于 Origin Rewrite 源码错误。
 
-## 下一阶段接入顺序
+## 当前接入结果与下一阶段
 
-1. 针对目标手机版本确认真实生成提交方法的所属类型、实例标记、返回类型和每个参数类型；确认后才安装 Hook。
-2. 确认死亡 Hook 位于原版掉落前还是后；不确定时只保留原版掉落。
-3. 用真实字段验证 `lifeMax/life/damage/defense/knockBackResist/scale/value/npcSlots`，缺少 `defDamage/defDefense` 时继续使用状态表，不猜字段。
-4. 建立目标版本的显式原版物品、装备、饰品和宝匣 ID 白名单，再启用 `or_item_registry_pick()`。
-5. 实现 TEF 资源读取和世界数据序列化，使 `general.json`、`tiers.json`、`ai.json`、`loot.json`、`rules.json` 各自只有一个权威来源。
+已完成：真实 NPC Hook 接入、最终原版基准读取、一次性属性覆盖、AI 状态机 tick、首次跨阈值狂怒、主机/单机掉落结算和槽位复用清理。
+
+下一步：
+
+1. 对 `Item.NewItem` 完成目标版本精确签名校验和原版物品/装备/饰品/宝匣白名单，再启用一个额外奖励槽。
+2. 对死亡入口做前后顺序验证；在顺序不确定时继续只保留原版掉落。
+3. 接入真实玩家位置、地形、天气快照；当前安全默认值是地表森林、晴天、白天。
+4. 在手机端测试普通、稀有、传奇三档体型、金币、属性和多人客户端不重复结算。
 
 `Resources/config/README.md` 说明了为什么资源 JSON 在原生资源接口确认前不会被伪装成“已加载”。

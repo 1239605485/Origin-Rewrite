@@ -10,6 +10,13 @@ The native adapter owns only observation and application:
 - apply the returned snapshot once;
 - report a verified death/loot ordering.
 
+The Android adapter currently uses the verified Terraria 1.4.5.6.4 entry
+points: `NPC.SetDefaults` for lifecycle reset, parameterless `NPC.AI()` for the
+first activation decision and AI ticking, and parameterless `NPC.NPCLoot()` for
+the post-vanilla reward boundary. `AI()` has a documented target-version
+exception: older PatchLib metadata may expose a hidden MethodInfo argument even
+though the known dispatcher is safe to hook on the reference mobile build.
+
 The pure core owns all decisions. It never calls PatchLib, allocates native objects, spawns an item, or assumes a Terraria method exists.
 
 | Concern | Pure-core owner | Native adapter responsibility |
@@ -46,3 +53,11 @@ The death adapter should call `or_state_mark_death()` exactly once. After the or
 - the method handle's validity.
 
 `or_runtime_field_matches()` checks the instance flag, type and byte size. A missing optional field is represented by a null capability; it is not guessed or replaced by a method lookup based only on parameter count.
+
+The only method discovered by parameter count without a complete argument-type
+list is the known `SetDefaults` overload family. Every candidate is still
+checked as an instance method before installation. `AI()` is accepted through
+the verified target-version exception above; `NPCLoot()` requires the complete
+instance/void/zero-argument signature. Extra item spawning remains disabled
+until `Item.NewItem` and the target-version vanilla item registry are both
+verified.

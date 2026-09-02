@@ -17,6 +17,7 @@ endif()
 
 set(ORIGINREWRITE_CORE_SOURCES
     src/mod.c
+    src/or_adapter.c
     src/or_ai.c
     src/or_config.c
     src/or_item_registry.c
