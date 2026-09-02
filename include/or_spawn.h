@@ -56,6 +56,8 @@ typedef struct OR_SpawnResult {
     OR_EliteRecord record;
 } OR_SpawnResult;
 
+const char *or_spawn_reject_reason_name(OR_SpawnRejectReason reason);
+
 bool or_spawn_try_commit(const OR_Config *config,
                          OR_StateStore *store,
                          const OR_SpawnContext *context,

@@ -48,6 +48,8 @@ endif()
 
 if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(ORIGINREWRITE_SYSTEM "android")
+    target_compile_definitions(OriginRewrite PRIVATE ORIGINREWRITE_USE_ANDROID_LOG=1)
+    target_link_libraries(OriginRewrite PRIVATE log)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(ORIGINREWRITE_SYSTEM "windows")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")

@@ -11,11 +11,41 @@
 #include <limits.h>
 #include <float.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+
+#if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
+#include <android/log.h>
+#endif
 
 #define OR_LOG(level, ...) \
     do { \
         if (mod_logger_write) mod_logger_write((level), "OriginRewrite", __VA_ARGS__); \
+    } while (0)
+
+#define OR_DIAGNOSTIC_LOG_LIMIT 256u
+
+/* The TEFManager archive does not always include a mod's logger stream. Keep
+ * the normal logger and mirror bounded diagnostic messages to Android logcat
+ * so a callback and its native write-back can be verified independently. */
+#if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
+#define OR_DIAG_EMIT(...) \
+    __android_log_print(ANDROID_LOG_WARN, "OriginRewrite", __VA_ARGS__)
+#else
+#define OR_DIAG_EMIT(...) \
+    do { fprintf(stderr, "[OriginRewrite] "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } while (0)
+#endif
+
+#define OR_DIAG_LOG(...) \
+    do { \
+        if (g_adapter.diagnostic_log_count < OR_DIAGNOSTIC_LOG_LIMIT) { \
+            ++g_adapter.diagnostic_log_count; \
+            if (mod_logger_write) { \
+                mod_logger_write(MOD_LOG_LEVEL_WARNING, "OriginRewrite", \
+                                 "[OR_DIAG] " __VA_ARGS__); \
+            } \
+            OR_DIAG_EMIT("[OR_DIAG] " __VA_ARGS__); \
+        } \
     } while (0)
 
 typedef struct OR_NativeBinding {
@@ -36,6 +66,8 @@ typedef struct OR_Adapter {
     OR_StateStore *state;
     OR_NativeBinding bindings[OR_MAX_TRACKED_NPCS];
     uint64_t fallback_tick;
+    uint32_t diagnostic_log_count;
+    uint32_t diagnostic_callback_count;
     bool installed;
 } OR_Adapter;
 
@@ -256,7 +288,8 @@ static bool read_vanilla_stats(patch_handle_t instance,
                                bool *is_boss,
                                bool *is_town,
                                bool *is_friendly,
-                               bool *active) {
+                               bool *active,
+                               const char **failed_field) {
     int32_t type = 0;
     int32_t life_max = 0;
     int32_t life = 0;
@@ -267,14 +300,37 @@ static bool read_vanilla_stats(patch_handle_t instance,
     float slots = 1.0f;
     float value = 0.0f;
     bool local_active = false;
-    if (!g_adapter.runtime || !stats || !npc_type ||
-        !read_i32(g_adapter.runtime->field_type, instance, &type) ||
-        !read_i32(g_adapter.runtime->field_life_max, instance, &life_max) ||
-        !read_i32(g_adapter.runtime->field_life, instance, &life) ||
-        !read_i32(g_adapter.runtime->field_damage, instance, &damage) ||
-        !read_i32(g_adapter.runtime->field_defense, instance, &defense) ||
-        !read_float(g_adapter.runtime->field_knockback_resist, instance, &knockback) ||
-        !read_float(g_adapter.runtime->field_scale, instance, &scale)) {
+    if (failed_field) *failed_field = NULL;
+    if (!g_adapter.runtime || !stats || !npc_type) {
+        if (failed_field) *failed_field = "arguments/runtime";
+        return false;
+    }
+    if (!read_i32(g_adapter.runtime->field_type, instance, &type)) {
+        if (failed_field) *failed_field = "type";
+        return false;
+    }
+    if (!read_i32(g_adapter.runtime->field_life_max, instance, &life_max)) {
+        if (failed_field) *failed_field = "lifeMax";
+        return false;
+    }
+    if (!read_i32(g_adapter.runtime->field_life, instance, &life)) {
+        if (failed_field) *failed_field = "life";
+        return false;
+    }
+    if (!read_i32(g_adapter.runtime->field_damage, instance, &damage)) {
+        if (failed_field) *failed_field = "damage";
+        return false;
+    }
+    if (!read_i32(g_adapter.runtime->field_defense, instance, &defense)) {
+        if (failed_field) *failed_field = "defense";
+        return false;
+    }
+    if (!read_float(g_adapter.runtime->field_knockback_resist, instance, &knockback)) {
+        if (failed_field) *failed_field = "knockBackResist";
+        return false;
+    }
+    if (!read_float(g_adapter.runtime->field_scale, instance, &scale)) {
+        if (failed_field) *failed_field = "scale";
         return false;
     }
     /* SetDefaults is the verified activation boundary on the target mobile
@@ -334,7 +390,9 @@ static bool apply_final_stats(patch_handle_t instance, const OR_FinalStats *stat
     f32 = clamp_float(stats->scale);
     ok = field_write(g_adapter.runtime->field_scale, instance, &f32) && ok;
     f32 = clamp_float(stats->money);
-    ok = field_write(g_adapter.runtime->field_value, instance, &f32) && ok;
+    if (g_adapter.runtime->field_value) {
+        ok = field_write(g_adapter.runtime->field_value, instance, &f32) && ok;
+    }
     if (have_body && stats->scale > 0.0f) {
         double body_ratio = (double)stats->scale / (double)vanilla_scale;
         width = clamp_i32((int64_t)llround((double)width * body_ratio));
@@ -374,6 +432,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     if (!host_authority(&single_player, &authority_known)) {
         if (authority_known) {
             binding->roll_resolved = true;
+            OR_DIAG_LOG("authority_skip type=%u reason=multiplayer_client",
+                        (unsigned)npc_type);
             return false;
         }
         single_player = true;
@@ -416,7 +476,12 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     memset(&spawn, 0, sizeof(spawn));
     if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
                              session ^ (uint64_t)(uintptr_t)instance ^ tick, &spawn) ||
-        !spawn.committed) return false;
+        !spawn.committed) {
+        OR_DIAG_LOG("commit_fail type=%u vanillaLife=%lld reason=%s",
+                    (unsigned)npc_type, (long long)vanilla->life_max,
+                    or_spawn_reject_reason_name(spawn.reason));
+        return false;
+    }
     binding->elite = true;
     binding->key = spawn.key;
     binding->previous_life_ratio = vanilla->life_max > 0
@@ -426,10 +491,31 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     }
     or_ai_runtime_init(&binding->ai_runtime);
     record = or_state_find_const(g_adapter.state, binding->key);
-    if (!record) return false;
-    if (!apply_final_stats(instance, &record->final_stats)) {
-        OR_LOG(MOD_LOG_LEVEL_WARNING, "Elite committed but native stat write was incomplete: type=%u",
-               (unsigned)npc_type);
+    if (!record) {
+        OR_DIAG_LOG("record_missing type=%u", (unsigned)npc_type);
+        return false;
+    }
+    {
+        bool write_ok = apply_final_stats(instance, &record->final_stats);
+        int32_t readback_life_max = -1;
+        int32_t readback_life = -1;
+        bool readback_life_max_ok = read_i32(g_adapter.runtime->field_life_max,
+                                             instance, &readback_life_max);
+        bool readback_life_ok = read_i32(g_adapter.runtime->field_life,
+                                         instance, &readback_life);
+        OR_DIAG_LOG("stat_write type=%u tier=%s vanillaLife=%lld finalLife=%lld "
+                    "writeOk=%s readbackLifeMax=%s:%d readbackLife=%s:%d",
+                    (unsigned)npc_type, or_elite_tier_name(spawn.tier),
+                    (long long)vanilla->life_max,
+                    (long long)record->final_stats.life_max,
+                    write_ok ? "yes" : "no",
+                    readback_life_max_ok ? "ok" : "fail", readback_life_max,
+                    readback_life_ok ? "ok" : "fail", readback_life);
+        if (!write_ok) {
+            OR_LOG(MOD_LOG_LEVEL_WARNING,
+                   "Elite committed but native stat write was incomplete: type=%u",
+                   (unsigned)npc_type);
+        }
     }
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
@@ -463,10 +549,21 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
         bool is_boss = false;
         bool is_town = false;
         bool is_friendly = false;
+        const char *failed_field = NULL;
         if (read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
-                               &is_friendly, NULL)) {
+                               &is_friendly, NULL, &failed_field)) {
+            if (g_adapter.diagnostic_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
+                ++g_adapter.diagnostic_callback_count;
+                OR_DIAG_LOG("setdefaults_callback count=%u type=%u vanillaLife=%lld life=%lld",
+                            (unsigned)g_adapter.diagnostic_callback_count,
+                            (unsigned)npc_type, (long long)vanilla.life_max,
+                            (long long)vanilla.life_current);
+            }
             (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
                                              is_boss, is_town, is_friendly);
+        } else {
+            OR_DIAG_LOG("setdefaults_read_fail field=%s",
+                        failed_field ? failed_field : "unknown");
         }
     }
 }
@@ -481,6 +578,7 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
     bool is_friendly = false;
     bool active = false;
     bool single_player = false;
+    const char *failed_field = NULL;
     float current_ratio;
     const OR_EliteRecord *record;
     (void)args;
@@ -490,7 +588,10 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
     binding = get_or_create_binding(instance);
     if (!binding) return;
     if (!read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
-                            &is_friendly, &active)) return;
+                            &is_friendly, &active, &failed_field)) {
+        OR_DIAG_LOG("ai_read_fail field=%s", failed_field ? failed_field : "unknown");
+        return;
+    }
     if (!active && !binding->elite) {
         clear_binding(binding);
         return;
@@ -591,6 +692,8 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     g_adapter.runtime = runtime;
     g_adapter.config = config;
     g_adapter.state = state;
+    OR_DIAG_LOG("adapter_ready setdefaults_candidates=%u stats_fields=ok",
+                (unsigned)runtime->method_setdefaults_count);
     for (i = 0; i < runtime->method_setdefaults_count; ++i) {
         if (install_postfix(runtime->method_setdefaults[i], setdefaults_postfix,
                             &runtime->setdefaults_hook_ids[runtime->setdefaults_hook_count])) {

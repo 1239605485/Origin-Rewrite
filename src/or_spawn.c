@@ -8,6 +8,23 @@
 
 #include <string.h>
 
+const char *or_spawn_reject_reason_name(OR_SpawnRejectReason reason) {
+    switch (reason) {
+        case OR_SPAWN_ACCEPTED: return "accepted";
+        case OR_SPAWN_REJECT_INVALID_INPUT: return "invalid_input";
+        case OR_SPAWN_REJECT_NOT_AUTHORITY: return "not_authority";
+        case OR_SPAWN_REJECT_INELIGIBLE_SOURCE: return "ineligible_source";
+        case OR_SPAWN_REJECT_INELIGIBLE_NPC: return "ineligible_npc";
+        case OR_SPAWN_REJECT_LIMIT: return "active_limit";
+        case OR_SPAWN_REJECT_CHANCE: return "chance";
+        case OR_SPAWN_REJECT_TIER_DISABLED: return "tier_disabled";
+        case OR_SPAWN_REJECT_COOLDOWN: return "cooldown";
+        case OR_SPAWN_REJECT_SLOT_BUSY: return "slot_busy";
+        case OR_SPAWN_REJECT_COMMIT_FAILED: return "commit_failed";
+        default: return "unknown";
+    }
+}
+
 static bool or_valid_progress(OR_ProgressStage progress) {
     return progress >= OR_PROGRESS_PRE_HARDMODE && progress < OR_PROGRESS_COUNT;
 }

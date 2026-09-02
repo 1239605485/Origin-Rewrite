@@ -2,7 +2,9 @@
 
 这是基于 v0.4 设计文档的 C11 实现。项目采用“原版 NPC + 运行时精英状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.1.7` 是移动端验证版：符合资格的敌怪生成概率暂时固定为 100%，便于确认属性 Hook；测试完成后应恢复为按普通/专家/大师/天顶模式分别配置的概率。
+当前 `0.1.8` 是移动端属性诊断版：符合资格的敌怪生成概率暂时固定为 100%，并在 SetDefaults、精英提交和 `lifeMax/life` 写回回读阶段输出 `[OR_DIAG]` 记录，便于确认属性 Hook；测试完成后应恢复为按普通/专家/大师/天顶模式分别配置的概率。
+
+诊断记录包含 `vanillaLife`、`finalLife`、`writeOk`、`readbackLifeMax` 和 `readbackLife`。其中 `readbackLifeMax` 与 `finalLife` 相同，才表示最大生命确实写入成功；如果日志包没有包含模组输出，可从 Android logcat 过滤 `OriginRewrite` 标签。
 
 本项目区分“源码包”和“手机安装包”：源码包可以包含 CMake、源码和测试；手机安装包必须把 `Manifest.json` 放在 ZIP 根目录，并把已经编译的动态库放在 `Resources/lib/` 下。不能把源码工程目录直接改名后交给 TEFManager。
 
