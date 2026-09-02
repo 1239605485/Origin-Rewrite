@@ -586,7 +586,11 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     (void)args;
     (void)result;
     (void)sig_info;
-    if (!instance || !g_adapter.installed) return;
+    /* The callback itself is installed only after runtime probing succeeds.
+     * Do not gate the verified SetDefaults stat path on the optional AI/loot
+     * lifecycle flag; the reference implementation applies its overlay as
+     * soon as this postfix runs. */
+    if (!instance || !g_adapter.runtime || !g_adapter.config || !g_adapter.state) return;
     binding = get_or_create_binding(instance);
     if (!binding) return;
     /* A new SetDefaults lifecycle invalidates any state left by a reused
