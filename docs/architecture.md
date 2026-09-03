@@ -10,13 +10,14 @@ The native adapter owns only observation and application:
 - apply the returned snapshot once;
 - report a verified death/loot ordering.
 
-The current crash-isolation Android adapter installs only the verified
-`NPC.SetDefaults` postfix for stat application and readback. `NPC.AI()` and
-`NPC.NPCLoot()` are probed but not installed, and name, color, and `Main.NewText`
-calls are probed but not invoked. Every SetDefaults transaction is reclaimed
-before the callback returns, because no AI/death hook is available to close a
-long-lived binding yet. These are temporary safety gates, not claims that the
-optional entry points are safe.
+The current P0 Android adapter installs only an exact-ABI `NPC.SetDefaults`
+observation postfix and an exact-ABI parameterless `NPC.AI()` postfix.
+`SetDefaults(int,bool)` records a pending baseline only; the first AI callback
+that reads `active=true` is the generation submission boundary. `NPC.NPCLoot()`
+and name, color, and `Main.NewText` calls are probed but not invoked. A pending
+object that never activates is reclaimed by the AI grace path or object-slot
+reuse, while a committed live record is protected until a verified lifecycle
+cleanup boundary.
 
 The pure core owns all decisions. It never calls PatchLib, allocates native objects, spawns an item, or assumes a Terraria method exists.
 
@@ -33,12 +34,12 @@ The pure core owns all decisions. It never calls PatchLib, allocates native obje
 
 ## Spawn transaction
 
-`or_spawn_try_commit()` is a transaction boundary. It checks authority and exclusions, snapshots rules, rolls the overall chance once, rolls the tier once, computes stats once, then reserves a slot generation and commits the complete state. During `SetDefaults`, the adapter uses a transient transaction so the returned stat snapshot is applied immediately like the verified reference mod; that temporary state is cleaned before the NPC enters the live pool. A failed commit cleans the pending record and does not increment the active elite count.
+`or_spawn_try_commit()` is a transaction boundary. It checks authority and exclusions, snapshots rules, rolls the overall chance once, rolls the tier once, computes stats once, then reserves a slot generation and commits the complete state. `SetDefaults` does not call this function. The AI activation callback supplies the final baseline and invokes it once; a failed commit cleans the pending binding and does not increment the active elite count.
 
-The adapter's `SetDefaults` stat overlay is the minimum gameplay gate. The AI
-and loot hooks remain disabled until their complete ABI and lifecycle are
-validated. Missing optional hooks must disable only their own behavior, never
-the verified health/damage/defense overlay.
+The adapter's verified AI callback is the minimum generation gate. The AI
+state-machine actions, loot hook, and visual calls remain disabled until their
+complete ABI and lifecycle are validated. Missing optional hooks must disable
+only their own behavior, never the verified health/damage/defense overlay.
 
 The state table has an independent `active_elites` count. `npcSlots` is returned as a stat for the game's spawn-capacity calculation; it is not used as a substitute for the number of active elite records.
 
@@ -60,10 +61,10 @@ The death adapter should call `or_state_mark_death()` exactly once. After the or
 
 `or_runtime_field_matches()` checks the instance flag, type and byte size. A missing optional field is represented by a null capability; it is not guessed or replaced by a method lookup based only on parameter count.
 
-The only method discovered by parameter count without a complete argument-type
-list is the known `SetDefaults` overload family. Every candidate is still
-checked as an instance method before installation. `AI()` and `NPCLoot()` are
-currently diagnostic-only probes; `NPCLoot()` still requires the complete
-instance/void/zero-argument signature before any future installation. Extra
-item spawning remains disabled until `Item.NewItem` and the target-version
-vanilla item registry are both verified.
+`SetDefaults` is discovered by parameter count only as a prefilter; the current
+target profile accepts only the exact instance/void/(int32,bool) signature.
+`AI()` is installed only after the exact instance/void/zero-argument signature
+check. `NPCLoot()` remains a diagnostic-only probe and still requires the
+complete signature before any future installation. Extra item spawning remains
+disabled until `Item.NewItem` and the target-version vanilla item registry are
+both verified.

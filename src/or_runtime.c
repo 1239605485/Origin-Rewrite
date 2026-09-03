@@ -261,6 +261,7 @@ static bool or_method_is_instance_void_zero(patch_handle_t method) {
 
 static void or_resolve_setdefaults_methods(OR_Runtime *runtime) {
     int args_count;
+    static const patch_type_t expected_args[] = {PATCH_INT32, PATCH_BOOL};
     if (!runtime || !patchlib_type_get_method_by_param_count ||
         !patchlib_method_get_signature) return;
     for (args_count = 0;
@@ -278,11 +279,25 @@ static void or_resolve_setdefaults_methods(OR_Runtime *runtime) {
             or_release_handle(method);
             continue;
         }
-        /* The installed callback has no argument bridge.  Accept only the
-         * exact verified instance/void/zero-argument method; a matching name
-         * or parameter count alone is not sufficient for a native hook. */
-        if (args_count == 0 &&
-            or_runtime_signature_matches(method, true, PATCH_VOID, NULL, 0u) &&
+        if (!runtime->setdefaults_probe_seen) {
+            size_t observed_count = tefstd_vector_size
+                ? tefstd_vector_size(&signature.arg_types) : 0u;
+            size_t observed_limit = observed_count < 4u ? observed_count : 4u;
+            size_t observed_index;
+            runtime->setdefaults_probe_seen = true;
+            runtime->setdefaults_probe_param_count = (int)observed_count;
+            for (observed_index = 0; observed_index < observed_limit;
+                 ++observed_index) {
+                runtime->setdefaults_probe_arg_types[observed_index] =
+                    or_signature_arg_type(&signature, observed_index);
+            }
+        }
+        /* Terraria 1.4.5.6.4 exposes SetDefaults(int, bool) here.  Parameter
+         * count is only a prefilter; accept the callback only after the exact
+         * instance/void/int32/bool signature is verified. */
+        if (args_count == 2 &&
+            or_runtime_signature_matches(method, true, PATCH_VOID,
+                                         expected_args, 2u) &&
             patchlib_method_get_name &&
             patchlib_method_get_name(method) &&
             strcmp(patchlib_method_get_name(method), "SetDefaults") == 0 &&

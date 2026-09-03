@@ -63,6 +63,9 @@ typedef struct OR_Runtime {
 
     patch_handle_t method_setdefaults[OR_SETDEFAULTS_METHOD_LIMIT];
     size_t method_setdefaults_count;
+    bool setdefaults_probe_seen;
+    int setdefaults_probe_param_count;
+    patch_type_t setdefaults_probe_arg_types[4];
     patch_handle_t method_ai;
     patch_handle_t method_npcloot;
     bool ai_known_dispatcher;

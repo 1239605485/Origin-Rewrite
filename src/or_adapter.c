@@ -30,12 +30,6 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
 
-/* Crash-isolation gate: SetDefaults is currently the only installed gameplay
- * hook, so every record made by it must be reclaimed before the callback
- * returns.  This prevents the disabled AI/death hooks from being required to
- * close the binding lifecycle. */
-#define OR_SAFE_MODE 1
-
 #define OR_DIAG_LOG(...) \
     do { \
         if (g_adapter.diagnostic_log_count < OR_DIAGNOSTIC_LOG_LIMIT) { \
@@ -48,11 +42,15 @@ typedef struct OR_NativeBinding {
     bool occupied;
     bool roll_resolved;
     bool elite;
-    bool prepared;
+    bool pending;
     bool loot_seen;
     patch_handle_t instance;
     OR_InstanceKey key;
-    OR_EliteRecord prepared_record;
+    OR_VanillaStats pending_vanilla;
+    uint32_t pending_npc_type;
+    bool pending_is_boss;
+    bool pending_is_town;
+    bool pending_is_friendly;
     OR_AiRuntimeState ai_runtime;
     uint64_t ai_ticks;
     float previous_life_ratio;
@@ -66,6 +64,7 @@ typedef struct OR_Adapter {
     uint64_t fallback_tick;
     uint32_t diagnostic_log_count;
     uint32_t diagnostic_callback_count;
+    uint32_t diagnostic_ai_callback_count;
     bool installed;
 } OR_Adapter;
 
@@ -194,13 +193,11 @@ static OR_NativeBinding *get_or_create_binding(patch_handle_t instance) {
             return &g_adapter.bindings[i];
         }
     }
-    /* Reclaim only bindings that are definitely not holding a prepared or
-     * live elite record. Never overwrite a live slot merely because the
-     * table is full. */
+    /* Pending baselines are disposable observations. Reclaim them when the
+     * table is full; only a committed live elite is protected. */
     for (i = 0; i < OR_MAX_TRACKED_NPCS; ++i) {
         if (g_adapter.bindings[i].occupied &&
-            !g_adapter.bindings[i].elite &&
-            !g_adapter.bindings[i].prepared) {
+            !g_adapter.bindings[i].elite) {
             clear_binding(&g_adapter.bindings[i]);
             memset(&g_adapter.bindings[i], 0, sizeof(g_adapter.bindings[i]));
             g_adapter.bindings[i].occupied = true;
@@ -597,8 +594,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                                        uint32_t npc_type,
                                        bool is_boss,
                                        bool is_town,
-                                       bool is_friendly,
-                                       bool native_active) {
+                                       bool is_friendly) {
     OR_SpawnContext context;
     OR_SpawnResult spawn;
     OR_ProgressStage progress;
@@ -634,8 +630,6 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.spawn_tick = tick;
     context.npc_slot = (int32_t)(binding - g_adapter.bindings);
     context.npc_type = npc_type;
-    /* SetDefaults has completed successfully, so it is a valid activation
-     * point even if NPC.active is not set until after the call returns. */
     context.npc_active = true;
     context.host_authority = true;
     context.single_player = single_player;
@@ -651,14 +645,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.weather = OR_WEATHER_CLEAR;
     context.is_night = false;
     context.archetype = OR_AI_ARCHETYPE_MELEE;
-    /* SetDefaults runs before NPC.active is reliable and also runs for
-     * internal/template NPC objects. Applying the live-elite cap here can
-     * consume all slots before the first visible enemy is spawned. The cap
-     * belongs to a real active-spawn boundary; this verified direct hook must
-     * retain enough state slots to apply the stat overlay consistently. */
-    context.max_active_elites = native_active
-        ? g_adapter.config->max_active_elites : OR_MAX_TRACKED_NPCS;
-    context.transient_prepare = !native_active;
+    context.max_active_elites = g_adapter.config->max_active_elites;
+    context.transient_prepare = false;
     context.vanilla = *vanilla;
     memset(&spawn, 0, sizeof(spawn));
     if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
@@ -669,9 +657,9 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                     or_spawn_reject_reason_name(spawn.reason));
         return false;
     }
-    binding->elite = native_active;
-    binding->prepared = !native_active;
-    if (native_active) binding->key = spawn.key;
+    binding->elite = true;
+    binding->pending = false;
+    binding->key = spawn.key;
     binding->previous_life_ratio = vanilla->life_max > 0
         ? (float)vanilla->life_current / (float)vanilla->life_max : 1.0f;
     if (!isfinite(binding->previous_life_ratio) || binding->previous_life_ratio < 0.0f) {
@@ -683,13 +671,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         OR_DIAG_LOG("record_missing type=%u", (unsigned)npc_type);
         return false;
     }
-    if (!native_active) {
-        binding->prepared_record = *record;
-        (void)or_state_cleanup(g_adapter.state, spawn.key);
-        record = &binding->prepared_record;
-    } else {
-        binding->key = spawn.key;
-    }
+    binding->key = spawn.key;
     {
         bool write_ok = apply_final_stats(instance, &record->final_stats);
         int32_t readback_life_max = -1;
@@ -712,58 +694,14 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                    (unsigned)npc_type);
         }
     }
-    /* Safe mode deliberately performs no optional visual or chat call.  The
-     * 0.2.5 NewText-only probe still crashed on the device, so capability
-     * discovery remains in or_runtime.c but invocation stays closed until a
-     * complete ABI-safe bridge is proven. */
+    /* P0 deliberately performs no optional visual, chat, loot, or special-AI
+     * call. Capability discovery remains in or_runtime.c; invocation stays
+     * closed until each complete bridge is separately proven. */
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] color/name/NewText skipped; transient stats only");
+           "[SAFE_MODE] visual/loot/special-AI skipped; stats-only P0");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
            or_progress_stage_name(progress), or_game_mode_name(mode));
-    return true;
-}
-
-/* SetDefaults is also used for NPC templates before they enter the live pool.
- * Their stat overlay must happen immediately like the verified reference mod,
- * but their AI/loot state must not consume the live-elite store. Attach that
- * already computed record on the first AI callback after active becomes true. */
-static bool attach_prepared_record(OR_NativeBinding *binding) {
-    OR_EliteRecord *prepared;
-    OR_InstanceKey key;
-    uint32_t active_limit;
-    if (!binding || !binding->prepared || !g_adapter.state || !g_adapter.config) return false;
-    prepared = &binding->prepared_record;
-    active_limit = g_adapter.config->max_active_elites != 0u
-        ? g_adapter.config->max_active_elites : OR_MAX_TRACKED_NPCS;
-    if (or_state_active_count(g_adapter.state) >= active_limit) {
-        OR_DIAG_LOG("attach_fail type=%u reason=active_limit",
-                    (unsigned)prepared->npc_type);
-        return false;
-    }
-    if (!or_state_acquire_pending(g_adapter.state, prepared->key.world_session_id,
-                                  prepared->key.npc_slot, prepared->npc_type,
-                                  prepared->source, prepared->spawn_tick, &key)) {
-        OR_DIAG_LOG("attach_fail type=%u reason=slot_busy",
-                    (unsigned)prepared->npc_type);
-        return false;
-    }
-    if (!or_state_commit_spawn(g_adapter.state, key, prepared->progress,
-                               prepared->mode, prepared->tier, &prepared->vanilla,
-                               &prepared->final_stats, &prepared->rules,
-                               &prepared->ai_plan) ||
-        !or_state_mark_live(g_adapter.state, key)) {
-        (void)or_state_cleanup(g_adapter.state, key);
-        OR_DIAG_LOG("attach_fail type=%u reason=state_commit",
-                    (unsigned)prepared->npc_type);
-        return false;
-    }
-    or_state_note_spawn(g_adapter.state, key);
-    binding->key = key;
-    binding->elite = true;
-    binding->prepared = false;
-    OR_DIAG_LOG("attach_ok type=%u tier=%s", (unsigned)prepared->npc_type,
-                or_elite_tier_name(prepared->tier));
     return true;
 }
 
@@ -773,16 +711,14 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     (void)args;
     (void)result;
     (void)sig_info;
-    /* The callback itself is installed only after runtime probing succeeds.
-     * Do not gate the verified SetDefaults stat path on the optional AI/loot
-     * lifecycle flag; the reference implementation applies its overlay as
-     * soon as this postfix runs. */
+    /* SetDefaults is observation only under v0.5. It must not roll, commit,
+     * consume the active limit, or write native stats. */
     if (!instance || !g_adapter.runtime || !g_adapter.config || !g_adapter.state) return;
     binding = get_or_create_binding(instance);
     if (!binding) return;
     /* A new SetDefaults lifecycle invalidates any state left by a reused
-     * Terraria NPC object, including a prepared record that never attached. */
-    if (binding->elite || binding->prepared || binding->roll_resolved) {
+     * Terraria NPC object, including a pending baseline that never activated. */
+    if (binding->elite || binding->pending || binding->roll_resolved) {
         clear_binding(binding);
         binding = get_or_create_binding(instance);
         if (!binding) return;
@@ -808,28 +744,24 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
                             (unsigned)npc_type, (long long)vanilla.life_max,
                             (long long)vanilla.life_current);
             }
-            {
-                bool committed = commit_elite_from_baseline(
-                    instance, binding, &vanilla, npc_type,
-                    is_boss, is_town, is_friendly, active);
-                if (OR_SAFE_MODE && binding->occupied) {
-                    bool was_elite = binding->elite;
-                    bool was_prepared = binding->prepared;
-                    clear_binding(binding);
-                    OR_DIAG_LOG("safe_mode_cleanup type=%u committed=%s elite=%s prepared=%s",
-                                (unsigned)npc_type, committed ? "yes" : "no",
-                                was_elite ? "yes" : "no",
-                                was_prepared ? "yes" : "no");
-                }
-            }
+            binding->pending = true;
+            binding->pending_vanilla = vanilla;
+            binding->pending_npc_type = npc_type;
+            binding->pending_is_boss = is_boss;
+            binding->pending_is_town = is_town;
+            binding->pending_is_friendly = is_friendly;
+            OR_DIAG_LOG("setdefaults_pending type=%u vanillaLife=%lld life=%lld active=%s",
+                        (unsigned)npc_type, (long long)vanilla.life_max,
+                        (long long)vanilla.life_current, active ? "yes" : "no");
         } else {
             OR_DIAG_LOG("setdefaults_read_fail field=%s",
                         failed_field ? failed_field : "unknown");
+            clear_binding(binding);
         }
     }
 }
 
-static void __attribute__((unused)) ai_postfix(
+static void ai_postfix(
     patch_handle_t instance, void **args, void *result,
     const patch_method_signature_t *sig_info) {
     OR_NativeBinding *binding;
@@ -847,6 +779,12 @@ static void __attribute__((unused)) ai_postfix(
     (void)result;
     (void)sig_info;
     if (!instance || !g_adapter.installed || !g_adapter.config || !g_adapter.state) return;
+    if (g_adapter.diagnostic_ai_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
+        ++g_adapter.diagnostic_ai_callback_count;
+        OR_DIAG_LOG("ai_callback count=%u instance=%p",
+                    (unsigned)g_adapter.diagnostic_ai_callback_count,
+                    (void *)instance);
+    }
     binding = get_or_create_binding(instance);
     if (!binding) return;
     if (!read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
@@ -854,7 +792,7 @@ static void __attribute__((unused)) ai_postfix(
         OR_DIAG_LOG("ai_read_fail field=%s", failed_field ? failed_field : "unknown");
         return;
     }
-    if (binding->prepared) {
+    if (binding->pending) {
         if (!active) {
             /* A real NPC may expose active one or two AI calls after
              * SetDefaults. Template objects never become active and are
@@ -864,17 +802,17 @@ static void __attribute__((unused)) ai_postfix(
             clear_binding(binding);
             return;
         }
-        if (!attach_prepared_record(binding)) {
-            /* The native stats have already been written at SetDefaults, in
-             * the same boundary used by the verified reference mod. If the
-             * optional state attachment is unavailable, keep that overlay but
-             * do not retry or create duplicate state. */
-            binding->prepared = false;
-            binding->roll_resolved = true;
+        /* Read the post-AI baseline at the real activation point. The
+         * SetDefaults snapshot is retained only as a diagnostic fallback. */
+        binding->pending = false;
+        binding->roll_resolved = false;
+        if (!commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
+                                        is_boss, is_town, is_friendly)) {
+            /* Rejected rolls and failed transactions must not leave a binding
+             * that depends on a future death hook for cleanup. */
+            clear_binding(binding);
             return;
         }
-        apply_visual_markers(instance, binding->prepared_record.tier,
-                             npc_type, true);
     }
     if (!active && !binding->elite) {
         clear_binding(binding);
@@ -905,10 +843,13 @@ static void __attribute__((unused)) ai_postfix(
         return;
     }
     if (binding->roll_resolved) return;
-    /* Resolve the random outcome once per SetDefaults -> AI lifecycle. This
-     * prevents every AI tick from rerolling a rejected or accepted elite. */
-    (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
-                                     is_boss, is_town, is_friendly, true);
+    /* An active object may have missed SetDefaults because the binding table
+     * was full. Capture it here and commit exactly once at this real boundary. */
+    binding->roll_resolved = false;
+    if (!commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
+                                    is_boss, is_town, is_friendly)) {
+        clear_binding(binding);
+    }
 }
 
 static void __attribute__((unused)) loot_postfix(
@@ -969,6 +910,7 @@ static bool install_postfix(patch_handle_t method, postfix_callback_t callback,
 bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *state) {
     size_t i;
     bool any_setdefaults = false;
+    bool ai_hook_ok = false;
     if (g_adapter.installed) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "[ADAPTER_STATE] duplicate start ignored; existing hooks remain installed");
@@ -1003,28 +945,50 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
            (int)runtime->main_new_text_color_type);
     OR_DIAG_LOG("adapter_ready setdefaults_candidates=%u stats_fields=ok",
                 (unsigned)runtime->method_setdefaults_count);
+    if (runtime->method_setdefaults_count == 0u && runtime->setdefaults_probe_seen) {
+        OR_LOG(MOD_LOG_LEVEL_WARNING,
+               "[ENTRY_PROBE] SetDefaults rejected params=%d arg0=%d arg1=%d expected=int32,bool",
+               runtime->setdefaults_probe_param_count,
+               (int)runtime->setdefaults_probe_arg_types[0],
+               (int)runtime->setdefaults_probe_arg_types[1]);
+    }
     for (i = 0; i < runtime->method_setdefaults_count; ++i) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[ENTRY_PROBE] SetDefaults candidate=%u params=2 abi=int32,bool verified=yes",
+               (unsigned)i);
         if (install_postfix(runtime->method_setdefaults[i], setdefaults_postfix,
                             &runtime->setdefaults_hook_ids[runtime->setdefaults_hook_count])) {
             runtime->setdefaults_hook_count += 1u;
             any_setdefaults = true;
         }
     }
-    /* Stability gate: SetDefaults is the only entry point currently carried
-     * forward from the verified reference path. AI and NPCLoot remain
-     * discoverable for diagnostics but are not hooked until this build's
-     * callback ABI is proven from a live trace. */
+    if (runtime->method_ai &&
+        or_runtime_signature_matches(runtime->method_ai, true, PATCH_VOID, NULL, 0u)) {
+        ai_hook_ok = install_postfix(runtime->method_ai, ai_postfix,
+                                     &runtime->ai_hook_id);
+    }
+    /* v0.5 P0 gate: SetDefaults without a verified AI activation callback is
+     * observation-only and is not installed, otherwise pending bindings could
+     * accumulate without a real generation boundary. */
+    if (!ai_hook_ok) {
+        for (i = 0; i < runtime->setdefaults_hook_count; ++i) {
+            if (runtime->setdefaults_hook_ids[i] != PATCH_HOOK_INVALID_ID &&
+                patchlib_uninstall_hook) {
+                (void)patchlib_uninstall_hook(runtime->setdefaults_hook_ids[i]);
+            }
+            runtime->setdefaults_hook_ids[i] = PATCH_HOOK_INVALID_ID;
+        }
+        runtime->setdefaults_hook_count = 0u;
+        any_setdefaults = false;
+        OR_LOG(MOD_LOG_LEVEL_WARNING,
+               "[P0_GATE] AI postfix unavailable; SetDefaults capture disabled");
+    }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] AI and NPCLoot hooks disabled pending live ABI trace");
-    runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults;
+           "[SAFE_MODE] NPCLoot/color/name/NewText disabled pending P0 lifecycle trace");
+    runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
     runtime->capabilities.exact_loot_hook_resolved = runtime->loot_hook_id != PATCH_HOOK_INVALID_ID;
-    /* SetDefaults is the verified stat-application boundary. AI is an
-     * optional enhancement: an older/mobile metadata layout may expose a
-     * dispatcher that is safe to discover but not safe to hook. Requiring the
-     * AI hook here would disable the already-working SetDefaults overlay and
-     * differs from the verified reference mod. */
-    runtime->capabilities.gameplay_enabled = any_setdefaults;
+    runtime->capabilities.gameplay_enabled = any_setdefaults && ai_hook_ok;
     g_adapter.installed = runtime->capabilities.gameplay_enabled;
     OR_DIAG_LOG("adapter_hooks setdefaults=%u ai=%s loot=%s gameplay=%s safe_mode=on",
                 (unsigned)runtime->setdefaults_hook_count,

@@ -2,7 +2,7 @@
 
 这是基于 v0.4 设计文档的 C11 实现。项目采用“原版 NPC + 运行时精英状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.2.6-safe-state-fix`（versionCode `2026090427`）以 authority-fix 的 `or_*` 模块体系为主，补入已验证参考实现的诊断通道和 Android CI。此版本新增独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。颜色、名称和 `Main.NewText` 全部关闭；本版本只验证 `SetDefaults` 属性写入、回读和状态立即清理。普通/专家/大师/天顶精英基础概率为 20%/30%/40%/50%，旅行模式沿用普通概率；属性只在一次精英提交中从原版基准计算。
+当前 `0.2.7-p0-generation-gate`（versionCode `2026090428`）按设计文档 v0.5 调整生成顺序：`SetDefaults` 只记录 pending 和原版基准，只有已精确校验并安装的 `NPC.AI()` Postfix 在观察到 `active=true` 后才允许一次 `SpawnCommitted`。此版本新增独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。颜色、名称、`Main.NewText`、NPCLoot、额外掉落和特殊 AI 全部关闭；本版本只验证真实激活入口、一次性状态提交、属性写入/回读和生命周期清理。
 
 诊断记录包含 `vanillaLife`、`finalLife`、`writeOk`、`readbackLifeMax` 和 `readbackLife`。其中 `readbackLifeMax` 与 `finalLife` 相同，才表示最大生命确实写入成功；如果日志包没有包含模组输出，可从 Android logcat 过滤 `OriginRewrite` 标签。
 
@@ -19,15 +19,15 @@
 - `or_loot.c`：原版掉落保留、单额外奖励槽、阶段奖励分支、金币唯一后端边界。
 - `or_item_registry.c`：只允许显式、已确认的原版物品白名单，拒绝 Boss 袋、Boss 召唤物、未来内容和关键进度物品。
 - `or_runtime.c`：TEFKernel PatchLib 的字段精确检查、`SetDefaults` 方法签名精确检查、移动端目标入口探测，以及名称/颜色/公告能力探测。
-- `or_adapter.c`：本崩溃隔离版本只安装已经确认可追踪的 `NPC.SetDefaults` 后缀 Hook；AI 和 NPCLoot 只探测、不安装；颜色、名称和 `Main.NewText` 只探测、不调用；每次回调结束立即清理临时/活动状态，避免依赖未安装的 AI/死亡 Hook。
+- `or_adapter.c`：只安装精确校验的 `NPC.SetDefaults(int,bool)` 观察 Hook 和 `NPC.AI()` Postfix；SetDefaults 只保存 pending，AI 首次确认 active 后才提交；AI/NPCLoot 的玩法逻辑、颜色、名称和公告调用仍关闭。
 - `or_world.c`：世界规则的版本、配置哈希、规则种子和世界种子指纹校验。
 
-当前安全版本只安装已经确认可追踪的 `SetDefaults` 入口；AI、NPCLoot、名称、颜色和公告调用均关闭。任一入口不可用只关闭对应能力，不猜测其他重载。
+当前 P0 版本只有在 `SetDefaults(int,bool)` 与无参数 `AI()` 均通过精确 ABI 校验并成功安装时才启用生成观察链路；任一入口不可用则关闭重构体升级，不猜测其他重载。
 
 ## 固定的不变量
 
-1. 原版 `SetDefaults` 完成后作为目标手机版已验证的激活边界，读取原版基准并立即提交一次精英状态；即使 `active` 尚未置 true，也不会错过首次生成。
-2. 每个 SetDefaults→AI 生命周期只允许一次随机结果。SetDefaults 阶段先完成原版属性覆盖；模板对象只保存临时结果，不占用活动精英状态表，首次确认 `active=true` 的 AI 回调再挂接 AI/掉落状态。AI Hook 是可选增强，不能反过来关闭已安装的 SetDefaults 属性 Hook。`active`、`NPC.value` 和 `Main.netMode` 属于可选兼容字段，不会阻止核心生命/伤害/防御属性提交。
+1. `SetDefaults` 只记录 pending 和原版基准，不抽取层级、不提交状态、不修改属性、不消耗活动名额。
+2. 只有首次确认 `active=true` 的 AI Postfix 才能执行一次 `SpawnCommitted`；同一对象和 generation 不能重复 roll、重复提交或重复应用属性。AI Hook 未安装或未进入日志时，重构体升级保持关闭。
 3. 原版难度和种子修正完成后，读取一次最终基准；所有字段从快照重新计算，不能每帧重复乘算。
 4. 传奇（天顶世界）使用独立配置，不再额外叠加大师配置；旅行模式使用普通属性和普通等级权重，再应用独立概率倍率。
 5. 进度 × 精英等级属性表是唯一的阶段属性来源；全局等级配置只保存防御、体型、金币、击退和刷怪占用等通用值。
@@ -85,7 +85,7 @@ OriginRewrite-android-arm64.zip
 
 ## 当前接入结果与下一阶段
 
-已完成：真实 NPC `SetDefaults` Hook 接入、最终原版基准读取、一次性属性覆盖、独立运行日志和槽位复用清理。当前版本暂不安装 AI/NPCLoot Hook，也不执行颜色、名称或公告调用；SetDefaults 产生的状态在回调结束前清理，仅保留属性写入/回读诊断。
+已完成：真实 NPC `SetDefaults` Hook 的 pending 记录、精确的 `SetDefaults(int,bool)` ABI 门槛、AI Postfix 激活门槛、独立运行日志和槽位复用清理。当前版本不安装 NPCLoot Hook，也不执行颜色、名称或公告调用；只有真实 active AI 回调才会进行一次属性提交。
 
 下一步：
 

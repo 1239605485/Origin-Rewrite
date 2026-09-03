@@ -26,19 +26,21 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.2.6-safe-state-fix 安装后，先确认游戏能稳定启动，再进入世界并等待生成普通敌怪，最后导出 TEFKernel 日志。重点查找
+0.2.7-p0-generation-gate 安装后，先确认游戏能稳定启动，再进入世界并等待生成普通敌怪，最后导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
 
 同时检查：
 
-- `[MODULE_BEACON] version=0.2.6-safe-state-fix versionCode=2026090427`
+- `[MODULE_BEACON] version=0.2.7-p0-generation-gate versionCode=2026090428`
 - `[INIT_STAGE] config_done`
 - `[INIT_STAGE] runtime_probe_done`
-- `[SAFE_MODE] AI and NPCLoot hooks disabled pending live ABI trace`
-- `[SAFE_MODE] color/name/NewText skipped; transient stats only`
-- `[OR_DIAG] safe_mode_cleanup type=... committed=yes/no elite=yes/no prepared=yes/no`
+- `[ENTRY_PROBE] SetDefaults candidate=0 params=2 abi=int32,bool verified=yes`
+- `[SAFE_MODE] visual/loot/special-AI skipped; stats-only P0`
+- `[OR_DIAG] setdefaults_pending type=...`
+- `[OR_DIAG] stat_write ... readbackLifeMax=ok:...`
+- `[OR_DIAG] ai_callback count=...` and `Elite committed`
 
 本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
 请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。
