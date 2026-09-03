@@ -29,6 +29,75 @@ static OR_TerrainSnapshot test_terrain(void) {
     return (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE};
 }
 
+static void test_tier_attributes_and_body(void) {
+    OR_Config config;
+    OR_RuleSnapshot rules;
+    OR_StatsInput input;
+    OR_FinalStats altered;
+    OR_FinalStats calamity;
+    OR_FinalStats apocalypse;
+    OR_FinalStats repeated;
+    OR_FinalStats mode_result;
+
+    or_config_default(&config);
+    CHECK(or_config_validate(&config));
+    or_rules_clear(&rules);
+
+    /* The design document requires all three values to be calculated from
+     * the same post-vanilla baseline.  Keep this fixture intentionally
+     * simple so the expected values expose tier differences directly. */
+    input = (OR_StatsInput){
+        .config = &config,
+        .vanilla = test_vanilla(),
+        .progress = OR_PROGRESS_HARDMODE_PRE_MECH,
+        .mode = OR_MODE_CLASSIC,
+        .tier = OR_TIER_ALTERED,
+        .rules = rules,
+        .suppress_body_scale = false
+    };
+    CHECK(or_stats_apply(&input, &altered));
+    CHECK(altered.life_max == 145);   /* 100 × 1.45 */
+    CHECK(altered.damage == 13);      /* 10 × 1.25 */
+    CHECK(altered.defense == 10);     /* 5 × 1.10 + 4 */
+    CHECK(altered.scale == 1.05f);
+
+    input.tier = OR_TIER_CALAMITY;
+    CHECK(or_stats_apply(&input, &calamity));
+    CHECK(calamity.life_max == 210);  /* 100 × 2.10 */
+    CHECK(calamity.damage == 16);     /* 10 × 1.60 */
+    CHECK(calamity.defense == 13);    /* 5 × 1.20 + 7 */
+    CHECK(calamity.scale == 1.10f);
+
+    input.tier = OR_TIER_APOCALYPSE;
+    CHECK(or_stats_apply(&input, &apocalypse));
+    CHECK(apocalypse.life_max == 320); /* 100 × 3.20 */
+    CHECK(apocalypse.damage == 20);    /* 10 × 2.00 */
+    CHECK(apocalypse.defense == 19);   /* 5 × 1.30 + 12 */
+    CHECK(apocalypse.scale == 1.15f);
+    CHECK(altered.life_max < calamity.life_max && calamity.life_max < apocalypse.life_max);
+    CHECK(altered.damage < calamity.damage && calamity.damage < apocalypse.damage);
+    CHECK(altered.defense < calamity.defense && calamity.defense < apocalypse.defense);
+    CHECK(altered.scale < calamity.scale && calamity.scale < apocalypse.scale);
+
+    /* Reapplying from the unchanged vanilla snapshot is idempotent; this is
+     * the core guard against per-frame multiplication. */
+    CHECK(or_stats_apply(&input, &repeated));
+    CHECK(memcmp(&apocalypse, &repeated, sizeof(apocalypse)) == 0);
+
+    /* Mode multipliers affect combat fields only.  Tier body scale remains
+     * the tier-only value required by v0.4. */
+    input.tier = OR_TIER_ALTERED;
+    input.mode = OR_MODE_ZENITH;
+    CHECK(or_stats_apply(&input, &mode_result));
+    CHECK(mode_result.life_max == 232); /* round(100 × 1.45 × 1.60) */
+    CHECK(mode_result.damage == 20);    /* round(10 × 1.25 × 1.60) */
+    CHECK(mode_result.scale == 1.05f);
+
+    input.suppress_body_scale = true;
+    CHECK(or_stats_apply(&input, &mode_result));
+    CHECK(mode_result.scale == 1.0f);
+}
+
 static void test_config_and_stats(void) {
     OR_Config config;
     OR_RuleSnapshot rules;
@@ -329,6 +398,7 @@ static void test_world_persistence_and_item_gate(void) {
 
 int main(void) {
     test_config_and_stats();
+    test_tier_attributes_and_body();
     test_rule_caps();
     test_ai_gates();
     test_state_and_loot();
