@@ -30,6 +30,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
 #define OR_AI_DIAGNOSTIC_SAMPLE_LIMIT 8u
+#define OR_LIFECYCLE_HEALTH_INTERVAL 1800u
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -66,6 +67,15 @@ typedef struct OR_Adapter {
     uint32_t diagnostic_log_count;
     uint32_t diagnostic_callback_count;
     uint32_t diagnostic_ai_callback_count;
+    uint64_t setdefaults_total;
+    uint64_t ai_callback_total;
+    uint64_t commit_total;
+    uint64_t binding_reclaim_total;
+    uint64_t binding_full_total;
+    uint64_t pending_clear_total;
+    uint64_t elite_clear_total;
+    uint64_t lifecycle_reuse_total;
+    uint64_t last_health_tick;
     bool installed;
 } OR_Adapter;
 
@@ -200,6 +210,7 @@ static OR_NativeBinding *get_or_create_binding(patch_handle_t instance) {
         if (g_adapter.bindings[i].occupied &&
             !g_adapter.bindings[i].elite) {
             clear_binding(&g_adapter.bindings[i]);
+            g_adapter.binding_reclaim_total += 1u;
             memset(&g_adapter.bindings[i], 0, sizeof(g_adapter.bindings[i]));
             g_adapter.bindings[i].occupied = true;
             g_adapter.bindings[i].instance = instance;
@@ -208,16 +219,54 @@ static OR_NativeBinding *get_or_create_binding(patch_handle_t instance) {
             return &g_adapter.bindings[i];
         }
     }
+    g_adapter.binding_full_total += 1u;
     OR_DIAG_LOG("binding_table_full instance=%p", (void *)instance);
     return NULL;
 }
 
 static void clear_binding(OR_NativeBinding *binding) {
     if (!binding) return;
+    if (binding->pending) g_adapter.pending_clear_total += 1u;
+    if (binding->elite) g_adapter.elite_clear_total += 1u;
     if (binding->elite && g_adapter.state) {
         (void)or_state_cleanup(g_adapter.state, binding->key);
     }
     memset(binding, 0, sizeof(*binding));
+}
+
+static uint64_t update_tick(void);
+
+static void log_lifecycle_health(void) {
+    uint64_t tick;
+    uint32_t occupied = 0u;
+    uint32_t pending = 0u;
+    uint32_t elite = 0u;
+    size_t i;
+    if (!g_adapter.installed) return;
+    tick = update_tick();
+    if (g_adapter.last_health_tick != 0u &&
+        tick < g_adapter.last_health_tick + OR_LIFECYCLE_HEALTH_INTERVAL) return;
+    g_adapter.last_health_tick = tick;
+    for (i = 0; i < OR_MAX_TRACKED_NPCS; ++i) {
+        const OR_NativeBinding *binding = &g_adapter.bindings[i];
+        if (!binding->occupied) continue;
+        occupied += 1u;
+        if (binding->pending) pending += 1u;
+        if (binding->elite) elite += 1u;
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[LIFECYCLE_HEALTH] tick=%llu occupied=%u pending=%u elite=%u "
+           "setdefaults=%llu ai=%llu commits=%llu reclaim=%llu full=%llu "
+           "pendingClear=%llu eliteClear=%llu reuse=%llu",
+           (unsigned long long)tick, (unsigned)occupied, (unsigned)pending,
+           (unsigned)elite, (unsigned long long)g_adapter.setdefaults_total,
+           (unsigned long long)g_adapter.ai_callback_total,
+           (unsigned long long)g_adapter.commit_total,
+           (unsigned long long)g_adapter.binding_reclaim_total,
+           (unsigned long long)g_adapter.binding_full_total,
+           (unsigned long long)g_adapter.pending_clear_total,
+           (unsigned long long)g_adapter.elite_clear_total,
+           (unsigned long long)g_adapter.lifecycle_reuse_total);
 }
 
 static uint64_t world_session_id(void) {
@@ -731,6 +780,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                     or_spawn_reject_reason_name(spawn.reason));
             return false;
         }
+        g_adapter.commit_total += 1u;
     }
     binding->elite = true;
     binding->pending = false;
@@ -830,10 +880,12 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     /* A new SetDefaults lifecycle invalidates any state left by a reused
      * Terraria NPC object, including a pending baseline that never activated. */
     if (binding->elite || binding->pending || binding->roll_resolved) {
+        g_adapter.lifecycle_reuse_total += 1u;
         clear_binding(binding);
         binding = get_or_create_binding(instance);
         if (!binding) return;
     }
+    g_adapter.setdefaults_total += 1u;
     binding->roll_resolved = false;
     binding->loot_seen = false;
     binding->ai_ticks = 0u;
@@ -890,6 +942,8 @@ static void ai_postfix(
     (void)result;
     (void)sig_info;
     if (!instance || !g_adapter.installed || !g_adapter.config || !g_adapter.state) return;
+    g_adapter.ai_callback_total += 1u;
+    log_lifecycle_health();
     if (g_adapter.diagnostic_ai_callback_count < OR_AI_DIAGNOSTIC_SAMPLE_LIMIT) {
         ++g_adapter.diagnostic_ai_callback_count;
         OR_LOG(MOD_LOG_LEVEL_WARNING, "[OR_DIAG] ai_callback sample=%u instance=%p",

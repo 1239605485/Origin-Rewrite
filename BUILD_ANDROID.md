@@ -26,14 +26,14 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.3.4-elite-notice 安装后，先确认游戏能稳定启动，再进入世界并等待生成普通敌怪，最后导出 TEFKernel 日志。重点查找
+0.3.5-lifecycle-test 安装后，先确认游戏能稳定启动，再进入世界并长时间刷怪，最后导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
 
 同时检查：
 
-- `[MODULE_BEACON] version=0.3.4-elite-notice versionCode=2026090435`
+- `[MODULE_BEACON] version=0.3.5-lifecycle-test versionCode=2026090436`
 - `[INIT_STAGE] config_done`
 - `[INIT_STAGE] runtime_probe_done`
 - `[ENTRY_PROBE] SetDefaults candidate=0 params=2 abi=int32,pointer verified=yes`
@@ -44,6 +44,7 @@ bash scripts/package_android_arm64.sh
 - `[AI_TYPE] type=... aiStyle=... archetype=... applied=yes/no reason=verified_ai_style_mapping/unknown_ai_style_fallback`
 - `[ROLL] type=... baseChance=... effectiveChance=... passed=yes/no committed=yes/no reason=...`
 - `[ELITE_NOTICE] type=... tier=calamity/apocalypse requested=yes noticeOk=yes`
+- `[LIFECYCLE_HEALTH] tick=... occupied=... pending=... elite=... setdefaults=... ai=... commits=... reclaim=... full=... pendingClear=... eliteClear=... reuse=...`
 
 本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
 请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。
