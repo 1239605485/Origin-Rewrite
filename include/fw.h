@@ -89,6 +89,7 @@ bool fw_stats_build(const fw_spawn_input *input, fw_tier tier,
                     fw_final_stats *out_stats);
 
 /* 框架生命周期入口（由 mod.c 调用）。 */
+void fw_core_set_log_file(const char *path);
 bool fw_core_init(void);
 void fw_core_shutdown(void);
 bool fw_core_gameplay_ready(void);

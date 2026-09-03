@@ -16,6 +16,8 @@
 #include <android/log.h>
 #endif
 
+static FILE *g_runtime_log = NULL;
+
 /* The loader logger is optional.  Keep an independent diagnostic channel so
  * the P0 gate remains observable when the module logger symbol is unavailable
  * or when a TEFManager export omits module-local logger records. */
@@ -36,6 +38,14 @@ static void fw_log(mod_log_level_t level, const char *fmt, ...) {
         }
         va_end(logger_args);
     }
+    if (g_runtime_log) {
+        va_list file_args;
+        va_copy(file_args, args);
+        vfprintf(g_runtime_log, fmt, file_args);
+        fputc('\n', g_runtime_log);
+        fflush(g_runtime_log);
+        va_end(file_args);
+    }
 #if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
     __android_log_vprint(ANDROID_LOG_INFO, "OriginRewrite", fmt, args);
 #else
@@ -44,6 +54,16 @@ static void fw_log(mod_log_level_t level, const char *fmt, ...) {
     fputc('\n', stderr);
 #endif
     va_end(args);
+}
+
+void fw_core_set_log_file(const char *path) {
+    if (g_runtime_log) {
+        fclose(g_runtime_log);
+        g_runtime_log = NULL;
+    }
+    if (path && path[0] != '\0') {
+        g_runtime_log = fopen(path, "a");
+    }
 }
 
 #define FW_LOG(level, ...) \
@@ -805,7 +825,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.5-kernel-log-beacon setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.6-file-beacon setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
