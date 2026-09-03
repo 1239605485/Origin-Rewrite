@@ -2,7 +2,7 @@
 
 这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.2.8-rewrite-naming`（versionCode `2026090429`）按设计文档 v0.5 调整生成顺序：`SetDefaults` 只记录 pending 和原版基准，只有已精确校验并安装的 `NPC.AI()` Postfix 在观察到 `active=true` 后才允许一次 `SpawnCommitted`。首次提交后只尝试写入一次 `GivenName` 名称前缀；颜色、`Main.NewText`、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+当前 `0.2.9-name-fallback`（versionCode `2026090430`）按设计文档 v0.5 调整生成顺序：`SetDefaults` 只记录 pending 和原版基准，只有已精确校验并安装的 `NPC.AI()` Postfix 在观察到 `active=true` 后才允许一次 `SpawnCommitted`。首次提交后只尝试写入一次 `GivenName` 名称前缀；若敌怪没有自定义 GivenName，则尝试写入纯层级前缀并记录回读阶段。颜色、`Main.NewText`、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
 
 玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
 
@@ -87,7 +87,7 @@ OriginRewrite-android-arm64.zip
 
 ## 当前接入结果与下一阶段
 
-已完成：真实 NPC `SetDefaults` Hook 的 pending 记录、目标运行时实测的 `SetDefaults(int,pointer)` ABI 门槛、AI Postfix 激活门槛、独立运行日志和槽位复用清理。当前版本不安装 NPCLoot Hook，也不执行颜色或公告调用；只有真实 active AI 回调才会进行一次属性提交，并尝试一次重构体名称前缀写入。
+已完成：真实 NPC `SetDefaults` Hook 的 pending 记录、目标运行时实测的 `SetDefaults(int,pointer)` ABI 门槛、AI Postfix 激活门槛、独立运行日志和槽位复用清理。当前版本不安装 NPCLoot Hook，也不执行颜色或公告调用；只有真实 active AI 回调才会进行一次属性提交，并尝试一次重构体名称前缀写入。`[NAME_WRITE] reason=` 会区分空 GivenName 回退、setter 失败和回读失败。
 
 下一步：
 

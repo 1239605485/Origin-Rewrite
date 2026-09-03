@@ -340,7 +340,8 @@ static bool apply_color_marker(patch_handle_t instance, OR_EliteTier tier,
 }
 
 static bool write_given_name_marker(patch_handle_t instance,
-                                    OR_EliteTier tier) {
+                                    OR_EliteTier tier,
+                                    const char **failure_reason) {
     patch_handle_t original = PATCH_NULL;
     patch_handle_t replacement;
     patch_handle_t readback = PATCH_NULL;
@@ -350,47 +351,93 @@ static bool write_given_name_marker(patch_handle_t instance,
     char decorated[512];
     void *setter_args[1];
     uint64_t ignored_return = 0u;
+    const char *reason = "unknown";
+    bool used_empty_fallback = false;
+    if (failure_reason) *failure_reason = NULL;
     if (!g_adapter.runtime || !instance ||
         !g_adapter.runtime->capabilities.given_name_property_ready ||
         !g_adapter.runtime->method_given_name_get ||
         !g_adapter.runtime->method_given_name_set ||
         !patchlib_method_invoke_args || !patchlib_string_cstr ||
-        !patchlib_string_create) return false;
+        !patchlib_string_create) {
+        reason = "capability_missing";
+        goto fail;
+    }
     prefix = tier_prefix(tier);
-    if (!prefix || !patchlib_method_invoke_args(
-            g_adapter.runtime->method_given_name_get, instance, &original, NULL) ||
-        !handle_valid(original)) return false;
-    name = patchlib_string_cstr(original);
-    if (!name || name[0] == '\0') {
-        free(name);
-        return false;
+    if (!prefix) {
+        reason = "tier_prefix_missing";
+        goto fail;
     }
-    if (strstr(name, prefix) != NULL) {
-        free(name);
-        return true;
+    if (!patchlib_method_invoke_args(g_adapter.runtime->method_given_name_get,
+                                     instance, &original, NULL)) {
+        reason = "getter_invoke_failed";
+        goto fail;
     }
-    if (snprintf(decorated, sizeof(decorated), "%s·%s", prefix, name) >=
-        (int)sizeof(decorated)) {
+    name = handle_valid(original) ? patchlib_string_cstr(original) : NULL;
+    if (name && name[0] != '\0') {
+        if (strstr(name, prefix) != NULL) {
+            free(name);
+            if (failure_reason) *failure_reason = "already_prefixed";
+            return true;
+        }
+        if (snprintf(decorated, sizeof(decorated), "%s·%s", prefix, name) >=
+            (int)sizeof(decorated)) {
+            free(name);
+            reason = "decorated_name_too_long";
+            goto fail;
+        }
         free(name);
-        return false;
+    } else {
+        /* Hostile NPCs commonly have no custom GivenName. Keep the write
+         * compatible with that normal state instead of rejecting it; the
+         * runtime can then decide whether FullName uses the assigned value. */
+        free(name);
+        if (snprintf(decorated, sizeof(decorated), "%s", prefix) >=
+            (int)sizeof(decorated)) {
+            reason = "prefix_too_long";
+            goto fail;
+        }
+        used_empty_fallback = true;
+        reason = "empty_given_name_fallback";
     }
-    free(name);
     replacement = patchlib_string_create(decorated);
-    if (!handle_valid(replacement)) return false;
+    if (!handle_valid(replacement)) {
+        reason = "replacement_create_failed";
+        goto fail;
+    }
     setter_args[0] = &replacement;
     if (!patchlib_method_invoke_args(g_adapter.runtime->method_given_name_set,
-                                     instance, &ignored_return, setter_args) ||
-        !patchlib_method_invoke_args(g_adapter.runtime->method_given_name_get,
-                                     instance, &readback, NULL) ||
-        !handle_valid(readback)) return false;
+                                     instance, &ignored_return, setter_args)) {
+        reason = "setter_invoke_failed";
+        goto fail;
+    }
+    if (!patchlib_method_invoke_args(g_adapter.runtime->method_given_name_get,
+                                     instance, &readback, NULL)) {
+        reason = "readback_invoke_failed";
+        goto fail;
+    }
+    if (!handle_valid(readback)) {
+        reason = "readback_handle_invalid";
+        goto fail;
+    }
     readback_name = patchlib_string_cstr(readback);
-    if (!readback_name) return false;
+    if (!readback_name) {
+        reason = "readback_cstr_failed";
+        goto fail;
+    }
     if (strcmp(readback_name, decorated) != 0) {
         free(readback_name);
-        return false;
+        reason = "readback_mismatch";
+        goto fail;
     }
     free(readback_name);
+    if (failure_reason) *failure_reason = used_empty_fallback
+        ? reason : "ok";
     return true;
+
+fail:
+    if (failure_reason) *failure_reason = reason;
+    return false;
 }
 
 static bool show_elite_notice(OR_EliteTier tier, uint32_t npc_type) {
@@ -447,7 +494,7 @@ static void __attribute__((unused)) apply_visual_markers(
     bool announce) {
     uint32_t color_readback = 0u;
     bool color_ok = apply_color_marker(instance, tier, &color_readback);
-    bool name_ok = write_given_name_marker(instance, tier);
+    bool name_ok = write_given_name_marker(instance, tier, NULL);
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[COLOR_WRITE] instance=%p type=%u tier=%s color=%08x colorOk=%s readback=%08x",
            (void *)instance, (unsigned)npc_type, or_elite_tier_name(tier),
@@ -699,11 +746,13 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
      * Color, chat, loot, and special-AI bridges remain closed. */
     {
         const char *prefix = tier_prefix(spawn.tier);
-        bool name_ok = write_given_name_marker(instance, spawn.tier);
+        const char *name_reason = NULL;
+        bool name_ok = write_given_name_marker(instance, spawn.tier, &name_reason);
         OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[NAME_WRITE] type=%u tier=%s prefix=%s writeOk=%s",
+               "[NAME_WRITE] type=%u tier=%s prefix=%s writeOk=%s reason=%s",
                (unsigned)npc_type, or_elite_tier_name(spawn.tier),
-               prefix ? prefix : "unavailable", name_ok ? "yes" : "no");
+               prefix ? prefix : "unavailable", name_ok ? "yes" : "no",
+               name_reason ? name_reason : "not_recorded");
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[REWRITE_MARK] concept=重构体 tier=%s prefix=%s marker=%s",
                or_elite_tier_name(spawn.tier), prefix ? prefix : "unavailable",
@@ -794,9 +843,8 @@ static void ai_postfix(
     if (!instance || !g_adapter.installed || !g_adapter.config || !g_adapter.state) return;
     if (g_adapter.diagnostic_ai_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
         ++g_adapter.diagnostic_ai_callback_count;
-        OR_DIAG_LOG("ai_callback count=%u instance=%p",
-                    (unsigned)g_adapter.diagnostic_ai_callback_count,
-                    (void *)instance);
+        OR_LOG(MOD_LOG_LEVEL_WARNING, "[OR_DIAG] ai_callback count=%u instance=%p",
+               (unsigned)g_adapter.diagnostic_ai_callback_count, (void *)instance);
     }
     binding = get_or_create_binding(instance);
     if (!binding) return;
