@@ -83,6 +83,8 @@ static fw_binding g_bindings[FW_MAX_BINDINGS];
 static bool g_started = false;
 static bool g_gameplay_ready = false;
 static uint32_t g_diag_count = 0u;
+static uint32_t g_setdefaults_hits = 0u;
+static uint32_t g_ai_hits = 0u;
 static uint64_t g_fallback_tick = 0u;
 static uint64_t g_next_generation = 1u;
 
@@ -594,6 +596,10 @@ static void fw_setdefaults_postfix(patch_handle_t instance, void **args,
     bool friendly = false;
     bool active = false;
     const char *failed_field = NULL;
+
+    ++g_setdefaults_hits;
+    FW_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_HIT] SetDefaults count=%u instance=%p",
+           (unsigned)g_setdefaults_hits, (void *)instance);
     (void)args;
     (void)result;
     (void)sig_info;
@@ -642,6 +648,10 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
     bool friendly = false;
     bool active = false;
     const char *failed_field = NULL;
+
+    ++g_ai_hits;
+    FW_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_HIT] AI count=%u instance=%p",
+           (unsigned)g_ai_hits, (void *)instance);
     (void)args;
     (void)result;
     (void)sig_info;
@@ -702,6 +712,8 @@ bool fw_core_init(void) {
 
     memset(g_bindings, 0, sizeof(g_bindings));
     g_diag_count = 0u;
+    g_setdefaults_hits = 0u;
+    g_ai_hits = 0u;
     g_fallback_tick = 0u;
     g_gameplay_ready = false;
 
@@ -764,6 +776,12 @@ bool fw_core_init(void) {
             (unsigned)g_runtime.setdefaults_hook_count,
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
+    FW_LOG(MOD_LOG_LEVEL_INFO,
+           "[HOOK_STATE] version=1.0.2-hook-debug setdefaults=%u ai=%s "
+           "gameplay=%s; waiting_for_runtime_callbacks",
+           (unsigned)g_runtime.setdefaults_hook_count,
+           g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
+           g_gameplay_ready ? "on" : "off");
     return g_gameplay_ready;
 }
 
