@@ -1,6 +1,6 @@
 #include "or_adapter.h"
 
-#include "mod_logger.h"
+#include "or_log.h"
 #include "or_ai.h"
 #include "or_loot.h"
 #include "or_spawn.h"
@@ -26,10 +26,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
                                            void *instance);
 #endif
 
-#define OR_LOG(level, ...) \
-    do { \
-        if (mod_logger_write) mod_logger_write((level), "OriginRewrite", __VA_ARGS__); \
-    } while (0)
+#define OR_LOG(level, ...) do { or_log_write((level), __VA_ARGS__); } while (0)
 
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
 
@@ -825,8 +822,9 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     }
 }
 
-static void ai_postfix(patch_handle_t instance, void **args, void *result,
-                       const patch_method_signature_t *sig_info) {
+static void __attribute__((unused)) ai_postfix(
+    patch_handle_t instance, void **args, void *result,
+    const patch_method_signature_t *sig_info) {
     OR_NativeBinding *binding;
     OR_VanillaStats vanilla;
     uint32_t npc_type = 0;
@@ -906,8 +904,9 @@ static void ai_postfix(patch_handle_t instance, void **args, void *result,
                                      is_boss, is_town, is_friendly, true);
 }
 
-static void loot_postfix(patch_handle_t instance, void **args, void *result,
-                         const patch_method_signature_t *sig_info) {
+static void __attribute__((unused)) loot_postfix(
+    patch_handle_t instance, void **args, void *result,
+    const patch_method_signature_t *sig_info) {
     OR_NativeBinding *binding;
     OR_LootContext context;
     OR_LootResult loot;
@@ -999,16 +998,12 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
             any_setdefaults = true;
         }
     }
-    if (runtime->ai_known_dispatcher ||
-        or_runtime_signature_matches(runtime->method_ai, true, PATCH_VOID, NULL, 0u)) {
-        if (!install_postfix(runtime->method_ai, ai_postfix, &runtime->ai_hook_id)) {
-            OR_LOG(MOD_LOG_LEVEL_WARNING, "NPC AI hook installation failed; elite gameplay disabled");
-        }
-    }
-    if (runtime->method_npcloot &&
-        or_runtime_signature_matches(runtime->method_npcloot, true, PATCH_VOID, NULL, 0u)) {
-        (void)install_postfix(runtime->method_npcloot, loot_postfix, &runtime->loot_hook_id);
-    }
+    /* Stability gate: SetDefaults is the only entry point currently carried
+     * forward from the verified reference path. AI and NPCLoot remain
+     * discoverable for diagnostics but are not hooked until this build's
+     * callback ABI is proven from a live trace. */
+    OR_LOG(MOD_LOG_LEVEL_WARNING,
+           "[SAFE_MODE] AI and NPCLoot hooks disabled pending live ABI trace");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults;
     runtime->capabilities.exact_death_hook_resolved = false;
     runtime->capabilities.exact_loot_hook_resolved = runtime->loot_hook_id != PATCH_HOOK_INVALID_ID;
@@ -1019,7 +1014,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
      * differs from the verified reference mod. */
     runtime->capabilities.gameplay_enabled = any_setdefaults;
     g_adapter.installed = runtime->capabilities.gameplay_enabled;
-    OR_DIAG_LOG("adapter_hooks setdefaults=%u ai=%s loot=%s gameplay=%s",
+    OR_DIAG_LOG("adapter_hooks setdefaults=%u ai=%s loot=%s gameplay=%s safe_mode=on",
                 (unsigned)runtime->setdefaults_hook_count,
                 runtime->ai_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",
                 runtime->loot_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",

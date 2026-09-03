@@ -26,10 +26,20 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.2.2-authority-visual 安装后，进入世界并等待生成普通敌怪，再导出 TEFKernel 日志。重点查找
+0.2.3-stability 安装后，先确认游戏能稳定启动，再进入世界并等待生成普通敌怪，最后导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
+
+同时检查：
+
+- `[MODULE_BEACON] version=0.2.3-stability versionCode=2026090424`
+- `[INIT_STAGE] config_done`
+- `[INIT_STAGE] runtime_probe_done`
+- `[SAFE_MODE] AI and NPCLoot hooks disabled pending live ABI trace`
+
+本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
+请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。
 
 脚本固定使用 `arm64-v8a` 和 `android-24`，并在打包前检查四个根目录文件以及
 `Resources/lib/libOriginRewrite.android.arm64.so` 是否存在。
