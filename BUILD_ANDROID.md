@@ -26,14 +26,14 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.4.0-visual-member-scan 安装后，先确认游戏能稳定启动，再刷出若干重构体，最后导出 TEFKernel 日志。重点查找
+0.4.1-visual-method-signature 安装后，先确认游戏能稳定启动，再刷出若干重构体，最后导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
 
 同时检查：
 
-- `[MODULE_BEACON] version=0.4.0-visual-member-scan versionCode=2026090441`
+- `[MODULE_BEACON] version=0.4.1-visual-method-signature versionCode=2026090442`
 - `[INIT_STAGE] config_done`
 - `[INIT_STAGE] runtime_probe_done`
 - `[ENTRY_PROBE] SetDefaults candidate=0 params=2 abi=int32,pointer verified=yes`
@@ -51,6 +51,8 @@ bash scripts/package_android_arm64.sh
 - `[COLOR_COMPONENT] name=R/G/B/A size=... type=...`
 - `[VISUAL_MEMBER] kind=field/property/method name=... ...`
 - `[VISUAL_SCAN] logged=... limit=64`
+- `[VISUAL_METHOD_SIG] name=... instance=... returnType=... argCount=...`
+- `[VISUAL_METHOD_ARG] name=... index=... type=...`
 
 本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
 请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。

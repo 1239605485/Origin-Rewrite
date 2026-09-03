@@ -35,6 +35,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_PENDING_STALE_TICKS 600u
 #define OR_COLOR_PROBE_LIMIT 16u
 #define OR_VISUAL_MEMBER_LIMIT 64u
+#define OR_VISUAL_METHOD_ARG_LIMIT 8u
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -115,6 +116,42 @@ static bool visual_member_name(const char *name) {
     return false;
 }
 
+static void log_visual_method_signature(patch_handle_t method, const char *name) {
+    patch_method_signature_t signature;
+    size_t arg_count;
+    size_t i;
+    if (!method || !name || !patchlib_method_get_signature ||
+        !tefstd_vector_size || !tefstd_vector_at) return;
+    memset(&signature, 0, sizeof(signature));
+    if (!patchlib_method_get_signature(method, &signature)) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[VISUAL_METHOD_SIG] name=%s signature=unavailable", name);
+        return;
+    }
+    arg_count = tefstd_vector_size(&signature.arg_types);
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[VISUAL_METHOD_SIG] name=%s instance=%s returnType=%d argCount=%zu",
+           name, signature.is_instance ? "yes" : "no",
+           (int)signature.return_type, arg_count);
+    for (i = 0u; i < arg_count && i < OR_VISUAL_METHOD_ARG_LIMIT; ++i) {
+        patch_type_t *arg_type = (patch_type_t *)tefstd_vector_at(
+            &signature.arg_types, i);
+        if (arg_type) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[VISUAL_METHOD_ARG] name=%s index=%zu type=%d",
+                   name, i, (int)*arg_type);
+        }
+    }
+    if (arg_count > OR_VISUAL_METHOD_ARG_LIMIT) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[VISUAL_METHOD_ARG] name=%s truncated=yes limit=%u",
+               name, (unsigned)OR_VISUAL_METHOD_ARG_LIMIT);
+    }
+    if (patchlib_method_signature_free) {
+        (void)patchlib_method_signature_free(&signature);
+    }
+}
+
 static void scan_visual_members(OR_Runtime *runtime) {
     tefstd_vector_t entries = {0};
     size_t i;
@@ -180,6 +217,7 @@ static void scan_visual_members(OR_Runtime *runtime) {
                 OR_LOG(MOD_LOG_LEVEL_INFO,
                        "[VISUAL_MEMBER] kind=method name=%s handle=%p",
                        name, (void *)method);
+                log_visual_method_signature(method, name);
                 logged += 1u;
             }
         }
