@@ -406,23 +406,28 @@ static bool apply_color_marker(patch_handle_t instance, OR_EliteTier tier,
 static void probe_color_member(patch_handle_t instance, uint32_t npc_type) {
     void *storage;
     uint64_t raw = 0u;
+    uint64_t getter_raw = 0u;
     size_t size = 0u;
     patch_type_t type = PATCH_VOID;
     if (!instance || !g_adapter.runtime ||
         !g_adapter.runtime->capabilities.color_marker_probe_ready ||
         !g_adapter.runtime->field_color || !patchlib_field_get_pointer ||
         !patchlib_field_get_size || !patchlib_field_get_type ||
+        !patchlib_field_get_value ||
         g_adapter.color_probe_count >= OR_COLOR_PROBE_LIMIT) return;
     storage = patchlib_field_get_pointer(g_adapter.runtime->field_color, instance);
     size = patchlib_field_get_size(g_adapter.runtime->field_color);
     type = patchlib_field_get_type(g_adapter.runtime->field_color);
     if (storage && size >= sizeof(raw)) memcpy(&raw, storage, sizeof(raw));
+    patchlib_field_get_value(g_adapter.runtime->field_color, instance, &getter_raw);
     g_adapter.color_probe_count += 1u;
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[COLOR_PROBE] sample=%u type=%u fieldType=%d fieldSize=%zu "
-           "storage=%p raw=%016llx write=disabled reason=pointer8_unverified",
+           "storage=%p raw=%016llx getterRaw=%016llx write=disabled "
+           "reason=pointer8_unverified",
            (unsigned)g_adapter.color_probe_count, (unsigned)npc_type, (int)type,
-           size, storage, (unsigned long long)raw);
+           size, storage, (unsigned long long)raw,
+           (unsigned long long)getter_raw);
 }
 
 static bool write_given_name_marker(patch_handle_t instance,
