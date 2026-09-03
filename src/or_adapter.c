@@ -70,6 +70,7 @@ typedef struct OR_Adapter {
     uint64_t fallback_tick;
     uint32_t diagnostic_log_count;
     uint32_t diagnostic_callback_count;
+    bool first_setdefaults_logged;
     bool installed;
 } OR_Adapter;
 
@@ -619,6 +620,12 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
         const char *failed_field = NULL;
         if (read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
                                &is_friendly, &active, &failed_field)) {
+            if (!g_adapter.first_setdefaults_logged) {
+                g_adapter.first_setdefaults_logged = true;
+                OR_DIAG_LOG("setdefaults_first_callback type=%u vanillaLife=%lld life=%lld",
+                            (unsigned)npc_type, (long long)vanilla.life_max,
+                            (long long)vanilla.life_current);
+            }
             if (g_adapter.diagnostic_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
                 ++g_adapter.diagnostic_callback_count;
                 OR_DIAG_LOG("setdefaults_callback count=%u type=%u vanillaLife=%lld life=%lld",
