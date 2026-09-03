@@ -11,9 +11,9 @@ void (*mod_logger_write)(
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026090401,
+    .version_code = 2026090402,
     .api_version = 1,
-    .version = "1.0.0-corechain"
+    .version = "1.0.1-diagnostics"
 };
 
 static void fw_init_mod(kernel_mod_handle_t *handle) {
@@ -22,7 +22,7 @@ static void fw_init_mod(kernel_mod_handle_t *handle) {
     ready = fw_core_init();
     if (mod_logger_write) {
         mod_logger_write(MOD_LOG_LEVEL_INFO, "OriginRewrite",
-                         "Origin Rewrite(起源重构) v1.0.0-corechain "
+                         "Origin Rewrite(起源重构) v1.0.1-diagnostics "
                          "initialized; gameplay gate=%s",
                          ready ? "on" : "off");
     }

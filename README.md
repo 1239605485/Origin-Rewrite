@@ -1,4 +1,4 @@
-# Origin Rewrite v1.0.0-corechain（全新框架·最小核心链路版）
+# Origin Rewrite v1.0.1-diagnostics（全新框架·诊断可观测版）
 
 这是从旧 OriginRewrite 实现之外重新搭的干净框架。当前只做“最薄完整核心链路”，
 不含技能 AI、掉落、世界规则、地形天气、多人同步。
