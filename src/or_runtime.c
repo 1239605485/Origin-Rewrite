@@ -1,14 +1,21 @@
 #include "or_runtime.h"
 
+#include "or_log.h"
+
 #include "tefkernel/patchlib/type.h"
 #include "tefkernel/tefstd/vector.h"
 
+#include <ctype.h>
 #include <string.h>
 
 #if !defined(__ANDROID__)
 extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
                                            void *instance);
 #endif
+
+#define OR_WORLD_MEMBER_LIMIT 96u
+
+#define OR_RUNTIME_LOG(level, ...) do { or_log_write((level), __VA_ARGS__); } while (0)
 
 static void or_release_handle(patch_handle_t handle) {
     if (!handle) return;
@@ -23,6 +30,60 @@ static bool or_handle_is_valid(patch_handle_t handle) {
     if (!handle) return false;
     if (patchlib_is_valid) return patchlib_is_valid(handle);
     return true;
+}
+
+static bool or_world_member_name(const char *name) {
+    static const char *const tokens[] = {
+        "day", "night", "moon", "rain", "snow", "blood", "eclipse",
+        "sandstorm", "cloud", "wind", "world", "weather"
+    };
+    char lowered[128];
+    size_t i;
+    size_t j;
+    if (!name) return false;
+    for (i = 0u; i + 1u < sizeof(lowered) && name[i] != '\0'; ++i) {
+        lowered[i] = (char)tolower((unsigned char)name[i]);
+    }
+    lowered[i] = '\0';
+    for (j = 0u; j < sizeof(tokens) / sizeof(tokens[0]); ++j) {
+        if (strstr(lowered, tokens[j]) != NULL) return true;
+    }
+    return false;
+}
+
+static void or_scan_world_members(patch_handle_t main_type) {
+    tefstd_vector_t entries = {0};
+    size_t i;
+    uint32_t logged = 0u;
+    if (!main_type || !patchlib_type_get_fields || !patchlib_field_get_name ||
+        !patchlib_field_get_size || !patchlib_field_get_type ||
+        !patchlib_field_is_static || !patchlib_field_is_instance ||
+        !tefstd_vector_init || !tefstd_vector_size || !tefstd_vector_at ||
+        !tefstd_vector_destroy) return;
+    if (tefstd_vector_init(&entries, sizeof(patch_handle_t)) &&
+        patchlib_type_get_fields(main_type, true, &entries)) {
+        for (i = 0u; i < tefstd_vector_size(&entries) &&
+             logged < OR_WORLD_MEMBER_LIMIT; ++i) {
+            patch_handle_t *entry = (patch_handle_t *)tefstd_vector_at(&entries, i);
+            patch_handle_t field = entry ? *entry : PATCH_NULL;
+            const char *name = field ? patchlib_field_get_name(field) : NULL;
+            if (or_world_member_name(name)) {
+                OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                               "[WORLD_MEMBER] kind=field name=%s instance=%s "
+                               "static=%s size=%zu type=%d",
+                               name,
+                               patchlib_field_is_instance(field) ? "yes" : "no",
+                               patchlib_field_is_static(field) ? "yes" : "no",
+                               patchlib_field_get_size(field),
+                               (int)patchlib_field_get_type(field));
+                logged += 1u;
+            }
+        }
+    }
+    tefstd_vector_destroy(&entries);
+    OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                   "[WORLD_SCAN] logged=%u limit=%u",
+                   (unsigned)logged, (unsigned)OR_WORLD_MEMBER_LIMIT);
 }
 
 void or_runtime_init(OR_Runtime *runtime) {
@@ -455,6 +516,7 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     if (or_handle_is_valid(main_type)) {
         /* Do not pass an unresolved type into optional capability probing. */
         or_resolve_visual_members(runtime, main_type);
+        or_scan_world_members(main_type);
         runtime->main_game_mode = or_resolve_field_any(main_type, game_mode_names,
                                                        sizeof(game_mode_names) / sizeof(game_mode_names[0]),
                                                        false, PATCH_INT32, sizeof(int32_t));
