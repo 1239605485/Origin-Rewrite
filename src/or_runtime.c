@@ -278,11 +278,14 @@ static void or_resolve_setdefaults_methods(OR_Runtime *runtime) {
             or_release_handle(method);
             continue;
         }
-        if (signature.is_instance && signature.return_type == PATCH_VOID &&
+        /* The installed callback has no argument bridge.  Accept only the
+         * exact verified instance/void/zero-argument method; a matching name
+         * or parameter count alone is not sufficient for a native hook. */
+        if (args_count == 0 &&
+            or_runtime_signature_matches(method, true, PATCH_VOID, NULL, 0u) &&
             patchlib_method_get_name &&
             patchlib_method_get_name(method) &&
             strcmp(patchlib_method_get_name(method), "SetDefaults") == 0 &&
-            tefstd_vector_size(&signature.arg_types) == (size_t)args_count &&
             runtime->method_setdefaults_count < OR_SETDEFAULTS_METHOD_LIMIT) {
             runtime->method_setdefaults[runtime->method_setdefaults_count++] = method;
         } else {
@@ -399,8 +402,9 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     runtime->capabilities.stats_fields_resolved = fields_ok;
 
     main_type = patchlib_type_get_type("Terraria", "Main");
-    or_resolve_visual_members(runtime, main_type);
     if (or_handle_is_valid(main_type)) {
+        /* Do not pass an unresolved type into optional capability probing. */
+        or_resolve_visual_members(runtime, main_type);
         runtime->main_game_mode = or_resolve_field_any(main_type, game_mode_names,
                                                        sizeof(game_mode_names) / sizeof(game_mode_names[0]),
                                                        false, PATCH_INT32, sizeof(int32_t));
@@ -421,6 +425,8 @@ bool or_runtime_probe(OR_Runtime *runtime) {
                                                               sizeof(update_count_names) / sizeof(update_count_names[0]),
                                                               false, PATCH_INT64, sizeof(int64_t));
         }
+        or_release_handle(main_type);
+    } else {
         or_release_handle(main_type);
     }
 

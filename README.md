@@ -2,7 +2,7 @@
 
 这是基于 v0.4 设计文档的 C11 实现。项目采用“原版 NPC + 运行时精英状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.2.5-newtext-test`（versionCode `2026090426`）以 authority-fix 的 `or_*` 模块体系为主，补入已验证参考实现的诊断通道和 Android CI。此版本新增独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。颜色和名称写入继续关闭；本版本只恢复 `Main.NewText` 公告，作为单一变量进行真机验证。普通/专家/大师/天顶精英基础概率为 20%/30%/40%/50%，旅行模式沿用普通概率；属性只在一次精英提交中从原版基准计算。
+当前 `0.2.6-safe-state-fix`（versionCode `2026090427`）以 authority-fix 的 `or_*` 模块体系为主，补入已验证参考实现的诊断通道和 Android CI。此版本新增独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。颜色、名称和 `Main.NewText` 全部关闭；本版本只验证 `SetDefaults` 属性写入、回读和状态立即清理。普通/专家/大师/天顶精英基础概率为 20%/30%/40%/50%，旅行模式沿用普通概率；属性只在一次精英提交中从原版基准计算。
 
 诊断记录包含 `vanillaLife`、`finalLife`、`writeOk`、`readbackLifeMax` 和 `readbackLife`。其中 `readbackLifeMax` 与 `finalLife` 相同，才表示最大生命确实写入成功；如果日志包没有包含模组输出，可从 Android logcat 过滤 `OriginRewrite` 标签。
 
@@ -19,10 +19,10 @@
 - `or_loot.c`：原版掉落保留、单额外奖励槽、阶段奖励分支、金币唯一后端边界。
 - `or_item_registry.c`：只允许显式、已确认的原版物品白名单，拒绝 Boss 袋、Boss 召唤物、未来内容和关键进度物品。
 - `or_runtime.c`：TEFKernel PatchLib 的字段精确检查、`SetDefaults` 方法签名精确检查、移动端目标入口探测，以及名称/颜色/公告能力探测。
-- `or_adapter.c`：本测试版本只安装已经确认可追踪的 `NPC.SetDefaults` 后缀 Hook；AI 和 NPCLoot 只探测、不安装；颜色和名称只探测、不调用，仅单独测试 `Main.NewText`；按对象指针绑定一次性生成状态，并在槽位复用时清理旧代数。
+- `or_adapter.c`：本崩溃隔离版本只安装已经确认可追踪的 `NPC.SetDefaults` 后缀 Hook；AI 和 NPCLoot 只探测、不安装；颜色、名称和 `Main.NewText` 只探测、不调用；每次回调结束立即清理临时/活动状态，避免依赖未安装的 AI/死亡 Hook。
 - `or_world.c`：世界规则的版本、配置哈希、规则种子和世界种子指纹校验。
 
-当前 NewText 测试版本只安装已经确认可追踪的 `SetDefaults` 入口；AI、NPCLoot、名称和颜色调用仍关闭，仅执行单独的 `Main.NewText` 测试。任一入口不可用只关闭对应能力，不猜测其他重载。
+当前安全版本只安装已经确认可追踪的 `SetDefaults` 入口；AI、NPCLoot、名称、颜色和公告调用均关闭。任一入口不可用只关闭对应能力，不猜测其他重载。
 
 ## 固定的不变量
 
@@ -85,7 +85,7 @@ OriginRewrite-android-arm64.zip
 
 ## 当前接入结果与下一阶段
 
-已完成：真实 NPC `SetDefaults` Hook 接入、最终原版基准读取、一次性属性覆盖、独立运行日志和槽位复用清理。当前版本暂不安装 AI/NPCLoot Hook，也不执行颜色或名称写入；仅恢复公告调用进行单项验证。
+已完成：真实 NPC `SetDefaults` Hook 接入、最终原版基准读取、一次性属性覆盖、独立运行日志和槽位复用清理。当前版本暂不安装 AI/NPCLoot Hook，也不执行颜色、名称或公告调用；SetDefaults 产生的状态在回调结束前清理，仅保留属性写入/回读诊断。
 
 下一步：
 

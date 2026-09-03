@@ -30,6 +30,12 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
 
+/* Crash-isolation gate: SetDefaults is currently the only installed gameplay
+ * hook, so every record made by it must be reclaimed before the callback
+ * returns.  This prevents the disabled AI/death hooks from being required to
+ * close the binding lifecycle. */
+#define OR_SAFE_MODE 1
+
 #define OR_DIAG_LOG(...) \
     do { \
         if (g_adapter.diagnostic_log_count < OR_DIAGNOSTIC_LOG_LIMIT) { \
@@ -706,18 +712,12 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                    (unsigned)npc_type);
         }
     }
-    /* One-feature gate: color and GivenName remain disabled because their
-     * representation/write path is not proven. Main.NewText is tested alone
-     * in this version against the already-resolved four-argument signature. */
+    /* Safe mode deliberately performs no optional visual or chat call.  The
+     * 0.2.5 NewText-only probe still crashed on the device, so capability
+     * discovery remains in or_runtime.c but invocation stays closed until a
+     * complete ABI-safe bridge is proven. */
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[VISUAL_TEST] color/name skipped; NewText test begin");
-    {
-        bool notice_ok = show_elite_notice(spawn.tier, npc_type);
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[ELITE_NOTICE] type=%u tier=%s noticeOk=%s",
-               (unsigned)npc_type, or_elite_tier_name(spawn.tier),
-               notice_ok ? "yes" : "no");
-    }
+           "[SAFE_MODE] color/name/NewText skipped; transient stats only");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
            or_progress_stage_name(progress), or_game_mode_name(mode));
@@ -808,8 +808,20 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
                             (unsigned)npc_type, (long long)vanilla.life_max,
                             (long long)vanilla.life_current);
             }
-            (void)commit_elite_from_baseline(instance, binding, &vanilla, npc_type,
-                                             is_boss, is_town, is_friendly, active);
+            {
+                bool committed = commit_elite_from_baseline(
+                    instance, binding, &vanilla, npc_type,
+                    is_boss, is_town, is_friendly, active);
+                if (OR_SAFE_MODE && binding->occupied) {
+                    bool was_elite = binding->elite;
+                    bool was_prepared = binding->prepared;
+                    clear_binding(binding);
+                    OR_DIAG_LOG("safe_mode_cleanup type=%u committed=%s elite=%s prepared=%s",
+                                (unsigned)npc_type, committed ? "yes" : "no",
+                                was_elite ? "yes" : "no",
+                                was_prepared ? "yes" : "no");
+                }
+            }
         } else {
             OR_DIAG_LOG("setdefaults_read_fail field=%s",
                         failed_field ? failed_field : "unknown");
@@ -957,6 +969,11 @@ static bool install_postfix(patch_handle_t method, postfix_callback_t callback,
 bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *state) {
     size_t i;
     bool any_setdefaults = false;
+    if (g_adapter.installed) {
+        OR_LOG(MOD_LOG_LEVEL_WARNING,
+               "[ADAPTER_STATE] duplicate start ignored; existing hooks remain installed");
+        return true;
+    }
     if (!runtime || !config || !state || !config->enable_gameplay_hooks ||
         !runtime->capabilities.patchlib_available ||
         !runtime->capabilities.stats_fields_resolved) return false;
@@ -1019,6 +1036,8 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
 
 void or_adapter_stop(void) {
     size_t i;
+    /* Idempotent by design: runtime cleanup owns hook uninstallation, while
+     * this function only releases adapter state. */
     if (!g_adapter.state) {
         memset(&g_adapter, 0, sizeof(g_adapter));
         return;

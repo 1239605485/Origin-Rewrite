@@ -10,12 +10,13 @@ The native adapter owns only observation and application:
 - apply the returned snapshot once;
 - report a verified death/loot ordering.
 
-The Android adapter currently uses the verified Terraria 1.4.5.6.4 entry
-points: `NPC.SetDefaults` for the post-vanilla activation decision and stat
-commit, parameterless `NPC.AI()` for the state-machine tick, and parameterless
-`NPC.NPCLoot()` for the post-vanilla reward boundary. `AI()` has a documented target-version
-exception: older PatchLib metadata may expose a hidden MethodInfo argument even
-though the known dispatcher is safe to hook on the reference mobile build.
+The current crash-isolation Android adapter installs only the verified
+`NPC.SetDefaults` postfix for stat application and readback. `NPC.AI()` and
+`NPC.NPCLoot()` are probed but not installed, and name, color, and `Main.NewText`
+calls are probed but not invoked. Every SetDefaults transaction is reclaimed
+before the callback returns, because no AI/death hook is available to close a
+long-lived binding yet. These are temporary safety gates, not claims that the
+optional entry points are safe.
 
 The pure core owns all decisions. It never calls PatchLib, allocates native objects, spawns an item, or assumes a Terraria method exists.
 
@@ -34,7 +35,10 @@ The pure core owns all decisions. It never calls PatchLib, allocates native obje
 
 `or_spawn_try_commit()` is a transaction boundary. It checks authority and exclusions, snapshots rules, rolls the overall chance once, rolls the tier once, computes stats once, then reserves a slot generation and commits the complete state. During `SetDefaults`, the adapter uses a transient transaction so the returned stat snapshot is applied immediately like the verified reference mod; that temporary state is cleaned before the NPC enters the live pool. A failed commit cleans the pending record and does not increment the active elite count.
 
-The adapter's `SetDefaults` stat overlay is the minimum gameplay gate. The AI hook is optional because target-version metadata can expose a safe-to-run `AI()` dispatcher without exposing a signature that is safe to hook. Missing AI must disable only AI actions, never the already-installed health/damage overlay.
+The adapter's `SetDefaults` stat overlay is the minimum gameplay gate. The AI
+and loot hooks remain disabled until their complete ABI and lifecycle are
+validated. Missing optional hooks must disable only their own behavior, never
+the verified health/damage/defense overlay.
 
 The state table has an independent `active_elites` count. `npcSlots` is returned as a stat for the game's spawn-capacity calculation; it is not used as a substitute for the number of active elite records.
 
@@ -58,8 +62,8 @@ The death adapter should call `or_state_mark_death()` exactly once. After the or
 
 The only method discovered by parameter count without a complete argument-type
 list is the known `SetDefaults` overload family. Every candidate is still
-checked as an instance method before installation. `AI()` is accepted through
-the verified target-version exception above; `NPCLoot()` requires the complete
-instance/void/zero-argument signature. Extra item spawning remains disabled
-until `Item.NewItem` and the target-version vanilla item registry are both
-verified.
+checked as an instance method before installation. `AI()` and `NPCLoot()` are
+currently diagnostic-only probes; `NPCLoot()` still requires the complete
+instance/void/zero-argument signature before any future installation. Extra
+item spawning remains disabled until `Item.NewItem` and the target-version
+vanilla item registry are both verified.
