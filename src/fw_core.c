@@ -8,6 +8,7 @@
 #include <float.h>
 #include <limits.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,32 +16,48 @@
 #include <android/log.h>
 #endif
 
+/* The loader logger is optional.  Keep an independent diagnostic channel so
+ * the P0 gate remains observable when the module logger symbol is unavailable
+ * or when a TEFManager export omits module-local logger records. */
+static void fw_log(mod_log_level_t level, const char *fmt, ...) {
+    va_list args;
+    if (!fmt) return;
+
+    va_start(args, fmt);
+    if (mod_logger_write) {
+        va_list logger_args;
+        va_copy(logger_args, args);
+        /* The public logger is variadic, so use a small formatted buffer for
+         * the optional bridge to preserve identical output on every target. */
+        {
+            char message[512];
+            vsnprintf(message, sizeof(message), fmt, logger_args);
+            mod_logger_write(level, "OriginRewrite", "%s", message);
+        }
+        va_end(logger_args);
+    }
+#if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
+    __android_log_vprint(ANDROID_LOG_INFO, "OriginRewrite", fmt, args);
+#else
+    fputs("[OriginRewrite] ", stderr);
+    vfprintf(stderr, fmt, args);
+    fputc('\n', stderr);
+#endif
+    va_end(args);
+}
+
 #define FW_LOG(level, ...) \
-    do { \
-        if (mod_logger_write) { \
-            mod_logger_write((level), "OriginRewrite", __VA_ARGS__); \
-        } \
-    } while (0)
+    do { fw_log((level), __VA_ARGS__); } while (0)
 
 #define FW_DIAGNOSTIC_LOG_LIMIT 512u
 
 /* TEFManager 导出的日志包不一定包含模组自身 logger 流；保持双通道，
  * Android 上用 logcat 过滤 OriginRewrite 即可独立确认每次回调与回读。 */
-#if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
-#define FW_DIAG_EMIT(...) \
-    __android_log_print(ANDROID_LOG_WARN, "OriginRewrite", __VA_ARGS__)
-#else
-#define FW_DIAG_EMIT(...) \
-    do { fprintf(stderr, "[OriginRewrite] "); fprintf(stderr, __VA_ARGS__); \
-         fprintf(stderr, "\n"); } while (0)
-#endif
-
 #define FW_DIAG(...) \
     do { \
         if (g_diag_count < FW_DIAGNOSTIC_LOG_LIMIT) { \
             ++g_diag_count; \
             FW_LOG(MOD_LOG_LEVEL_WARNING, "[FW_DIAG] " __VA_ARGS__); \
-            FW_DIAG_EMIT("[FW_DIAG] " __VA_ARGS__); \
         } \
     } while (0)
 
