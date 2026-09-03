@@ -163,6 +163,10 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
     runtime->field_color = or_resolve_marker_field(runtime->npc_type, "color");
     runtime->capabilities.color_marker_probe_ready = runtime->field_color != PATCH_NULL;
     runtime->capabilities.color_marker_ready = false;
+    if (patchlib_type_get_type) {
+        runtime->color_type = patchlib_type_get_type(
+            "Microsoft.Xna.Framework", "Color");
+    }
 
     if (patchlib_type_get_property && patchlib_property_get_get_method &&
         patchlib_property_get_set_method && patchlib_method_get_signature &&
@@ -528,6 +532,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->field_boss);
     or_release_handle(runtime->field_ai_style);
     or_release_handle(runtime->field_color);
+    or_release_handle(runtime->color_type);
     or_release_handle(runtime->property_given_name);
     or_release_handle(runtime->method_given_name_get);
     or_release_handle(runtime->method_given_name_set);

@@ -86,6 +86,15 @@ typedef struct OR_Adapter {
 
 static OR_Adapter g_adapter;
 
+static void release_adapter_handle(patch_handle_t handle) {
+    if (!handle) return;
+#if defined(__ANDROID__)
+    (void)handle;
+#else
+    if (patchlib_free) patchlib_free(handle);
+#endif
+}
+
 static bool handle_valid(patch_handle_t handle) {
     if (!handle) return false;
     return !patchlib_is_valid || patchlib_is_valid(handle);
@@ -1140,6 +1149,38 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     } else {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "[COLOR_MARK] field=color unavailable ready=no");
+    }
+    if (runtime->color_type && patchlib_type_get_name &&
+        patchlib_type_get_namespace && patchlib_type_get_field &&
+        patchlib_field_get_size && patchlib_field_get_type) {
+        const char *const component_names[] = {"R", "G", "B", "A"};
+        char *full_name = patchlib_type_get_full_name
+            ? patchlib_type_get_full_name(runtime->color_type) : NULL;
+        size_t component_index;
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[COLOR_TYPE] type=available namespace=%s name=%s full=%s",
+               patchlib_type_get_namespace(runtime->color_type),
+               patchlib_type_get_name(runtime->color_type),
+               full_name ? full_name : "unavailable");
+        free(full_name);
+        for (component_index = 0u;
+             component_index < sizeof(component_names) / sizeof(component_names[0]);
+             ++component_index) {
+            patch_handle_t component = patchlib_type_get_field(
+                runtime->color_type, component_names[component_index]);
+            if (handle_valid(component)) {
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[COLOR_COMPONENT] name=%s size=%zu type=%d",
+                       component_names[component_index],
+                       patchlib_field_get_size(component),
+                       (int)patchlib_field_get_type(component));
+            }
+            if (component) {
+                release_adapter_handle(component);
+            }
+        }
+    } else {
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[COLOR_TYPE] type=unavailable");
     }
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[NAME_FIELD] property=%s getter=%s setter=%s",

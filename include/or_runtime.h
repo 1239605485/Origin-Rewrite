@@ -47,6 +47,7 @@ typedef struct OR_Runtime {
     patch_handle_t field_boss;
     patch_handle_t field_ai_style;
     patch_handle_t field_color;
+    patch_handle_t color_type;
     patch_handle_t property_given_name;
     patch_handle_t method_given_name_get;
     patch_handle_t method_given_name_set;
