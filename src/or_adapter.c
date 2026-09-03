@@ -10,6 +10,7 @@
 #include "tefkernel/patchlib/struct/string.h"
 
 #include <limits.h>
+#include <ctype.h>
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
@@ -33,6 +34,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_LIFECYCLE_HEALTH_INTERVAL 1800u
 #define OR_PENDING_STALE_TICKS 600u
 #define OR_COLOR_PROBE_LIMIT 16u
+#define OR_VISUAL_MEMBER_LIMIT 64u
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -93,6 +95,100 @@ static void release_adapter_handle(patch_handle_t handle) {
 #else
     if (patchlib_free) patchlib_free(handle);
 #endif
+}
+
+static bool visual_member_name(const char *name) {
+    static const char *const tokens[] = {
+        "color", "draw", "render", "alpha", "glow", "effect", "trail"
+    };
+    size_t i;
+    size_t j;
+    char lowered[128];
+    if (!name) return false;
+    for (i = 0u; i + 1u < sizeof(lowered) && name[i] != '\0'; ++i) {
+        lowered[i] = (char)tolower((unsigned char)name[i]);
+    }
+    lowered[i] = '\0';
+    for (j = 0u; j < sizeof(tokens) / sizeof(tokens[0]); ++j) {
+        if (strstr(lowered, tokens[j]) != NULL) return true;
+    }
+    return false;
+}
+
+static void scan_visual_members(OR_Runtime *runtime) {
+    tefstd_vector_t entries = {0};
+    size_t i;
+    uint32_t logged = 0u;
+    if (!runtime || !runtime->npc_type || !tefstd_vector_init ||
+        !tefstd_vector_size || !tefstd_vector_at || !tefstd_vector_destroy) return;
+
+    if (patchlib_type_get_fields && patchlib_field_get_name &&
+        patchlib_field_get_size && patchlib_field_get_type &&
+        tefstd_vector_init(&entries, sizeof(patch_handle_t)) &&
+        patchlib_type_get_fields(runtime->npc_type, true, &entries)) {
+        for (i = 0u; i < tefstd_vector_size(&entries) &&
+             logged < OR_VISUAL_MEMBER_LIMIT; ++i) {
+            patch_handle_t *entry = (patch_handle_t *)tefstd_vector_at(&entries, i);
+            patch_handle_t field = entry ? *entry : PATCH_NULL;
+            const char *name = field ? patchlib_field_get_name(field) : NULL;
+            if (visual_member_name(name)) {
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[VISUAL_MEMBER] kind=field name=%s size=%zu type=%d",
+                       name, patchlib_field_get_size(field),
+                       (int)patchlib_field_get_type(field));
+                logged += 1u;
+            }
+        }
+        tefstd_vector_destroy(&entries);
+    } else {
+        tefstd_vector_destroy(&entries);
+    }
+
+    if (patchlib_type_get_properties && patchlib_property_get_name &&
+        patchlib_property_get_get_method && patchlib_property_get_set_method &&
+        tefstd_vector_init(&entries, sizeof(patch_handle_t)) &&
+        patchlib_type_get_properties(runtime->npc_type, true, &entries)) {
+        for (i = 0u; i < tefstd_vector_size(&entries) &&
+             logged < OR_VISUAL_MEMBER_LIMIT; ++i) {
+            patch_handle_t *entry = (patch_handle_t *)tefstd_vector_at(&entries, i);
+            patch_handle_t property = entry ? *entry : PATCH_NULL;
+            const char *name = property ? patchlib_property_get_name(property) : NULL;
+            patch_handle_t getter = property ? patchlib_property_get_get_method(property) : PATCH_NULL;
+            patch_handle_t setter = property ? patchlib_property_get_set_method(property) : PATCH_NULL;
+            if (visual_member_name(name)) {
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[VISUAL_MEMBER] kind=property name=%s getter=%s setter=%s",
+                       name, getter ? "available" : "unavailable",
+                       setter ? "available" : "unavailable");
+                logged += 1u;
+            }
+        }
+        tefstd_vector_destroy(&entries);
+    } else {
+        tefstd_vector_destroy(&entries);
+    }
+
+    if (patchlib_type_get_methods && patchlib_method_get_name &&
+        tefstd_vector_init(&entries, sizeof(patch_handle_t)) &&
+        patchlib_type_get_methods(runtime->npc_type, true, &entries)) {
+        for (i = 0u; i < tefstd_vector_size(&entries) &&
+             logged < OR_VISUAL_MEMBER_LIMIT; ++i) {
+            patch_handle_t *entry = (patch_handle_t *)tefstd_vector_at(&entries, i);
+            patch_handle_t method = entry ? *entry : PATCH_NULL;
+            const char *name = method ? patchlib_method_get_name(method) : NULL;
+            if (visual_member_name(name)) {
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[VISUAL_MEMBER] kind=method name=%s handle=%p",
+                       name, (void *)method);
+                logged += 1u;
+            }
+        }
+        tefstd_vector_destroy(&entries);
+    } else {
+        tefstd_vector_destroy(&entries);
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[VISUAL_SCAN] logged=%u limit=%u",
+           (unsigned)logged, (unsigned)OR_VISUAL_MEMBER_LIMIT);
 }
 
 static bool handle_valid(patch_handle_t handle) {
@@ -1182,6 +1278,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     } else {
         OR_LOG(MOD_LOG_LEVEL_INFO, "[COLOR_TYPE] type=unavailable");
     }
+    scan_visual_members(runtime);
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[NAME_FIELD] property=%s getter=%s setter=%s",
            runtime->capabilities.given_name_property_ready ? "available" : "unavailable",

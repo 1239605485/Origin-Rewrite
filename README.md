@@ -2,7 +2,7 @@
 
 这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.3.9-color-type-probe`（versionCode `2026090440`）在上一版基础上继续只读解析 `NPC.color`：探测 `Microsoft.Xna.Framework.Color` 类型及其 `R/G/B/A` 成员 ABI，同时保留字段存储和 PatchLib getter 回读值；探针仍明确禁止写入。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+当前 `0.4.0-visual-member-scan`（versionCode `2026090441`）在上一版基础上继续只读解析 `NPC.color`，并安全枚举 `NPC` 暴露的字段、属性和方法名称，记录可能与颜色、绘制、透明度、发光、特效或拖尾相关的成员；扫描不会调用未知方法，也不会写入对象。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
 
 玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
 
