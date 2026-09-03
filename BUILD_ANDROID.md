@@ -45,6 +45,7 @@ bash scripts/package_android_arm64.sh
 - `[ROLL] type=... baseChance=... effectiveChance=... passed=yes/no committed=yes/no reason=...`
 - `[ELITE_NOTICE] type=... tier=calamity/apocalypse requested=yes noticeOk=yes`
 - `[LIFECYCLE_HEALTH] tick=... occupied=... pending=... elite=... setdefaults=... ai=... commits=... reclaim=... full=... pendingClear=... eliteClear=... reuse=...`
+- `[LIFECYCLE_CLEANUP] stalePending=... thresholdTicks=600`
 
 本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
 请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。

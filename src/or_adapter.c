@@ -31,6 +31,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
 #define OR_AI_DIAGNOSTIC_SAMPLE_LIMIT 8u
 #define OR_LIFECYCLE_HEALTH_INTERVAL 1800u
+#define OR_PENDING_STALE_TICKS 600u
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -55,6 +56,7 @@ typedef struct OR_NativeBinding {
     bool pending_is_friendly;
     OR_AiRuntimeState ai_runtime;
     uint64_t ai_ticks;
+    uint64_t last_seen_tick;
     float previous_life_ratio;
 } OR_NativeBinding;
 
@@ -75,6 +77,7 @@ typedef struct OR_Adapter {
     uint64_t pending_clear_total;
     uint64_t elite_clear_total;
     uint64_t lifecycle_reuse_total;
+    uint64_t stale_pending_clear_total;
     uint64_t last_health_tick;
     bool installed;
 } OR_Adapter;
@@ -248,7 +251,12 @@ static void log_lifecycle_health(void) {
         tick < g_adapter.last_health_tick + OR_LIFECYCLE_HEALTH_INTERVAL) return;
     g_adapter.last_health_tick = tick;
     for (i = 0; i < OR_MAX_TRACKED_NPCS; ++i) {
-        const OR_NativeBinding *binding = &g_adapter.bindings[i];
+        OR_NativeBinding *binding = &g_adapter.bindings[i];
+        if (binding->occupied && binding->pending && binding->last_seen_tick != 0u &&
+            tick > binding->last_seen_tick + OR_PENDING_STALE_TICKS) {
+            g_adapter.stale_pending_clear_total += 1u;
+            clear_binding(binding);
+        }
         if (!binding->occupied) continue;
         occupied += 1u;
         if (binding->pending) pending += 1u;
@@ -267,6 +275,10 @@ static void log_lifecycle_health(void) {
            (unsigned long long)g_adapter.pending_clear_total,
            (unsigned long long)g_adapter.elite_clear_total,
            (unsigned long long)g_adapter.lifecycle_reuse_total);
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[LIFECYCLE_CLEANUP] stalePending=%llu thresholdTicks=%u",
+           (unsigned long long)g_adapter.stale_pending_clear_total,
+           (unsigned)OR_PENDING_STALE_TICKS);
 }
 
 static uint64_t world_session_id(void) {
@@ -886,6 +898,7 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
         if (!binding) return;
     }
     g_adapter.setdefaults_total += 1u;
+    binding->last_seen_tick = update_tick();
     binding->roll_resolved = false;
     binding->loot_seen = false;
     binding->ai_ticks = 0u;
@@ -951,6 +964,7 @@ static void ai_postfix(
     }
     binding = get_or_create_binding(instance);
     if (!binding) return;
+    binding->last_seen_tick = update_tick();
     if (!read_vanilla_stats(instance, &npc_type, &vanilla, &is_boss, &is_town,
                             &is_friendly, &active, &failed_field)) {
         OR_DIAG_LOG("ai_read_fail field=%s", failed_field ? failed_field : "unknown");
