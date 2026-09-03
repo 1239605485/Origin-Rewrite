@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
 #include <android/log.h>
@@ -41,6 +42,7 @@ static void fw_log(mod_log_level_t level, const char *fmt, ...) {
     if (g_runtime_log) {
         va_list file_args;
         va_copy(file_args, args);
+        fprintf(g_runtime_log, "[%lld] ", (long long)time(NULL));
         vfprintf(g_runtime_log, fmt, file_args);
         fputc('\n', g_runtime_log);
         fflush(g_runtime_log);
@@ -105,8 +107,14 @@ static bool g_gameplay_ready = false;
 static uint32_t g_diag_count = 0u;
 static uint32_t g_setdefaults_hits = 0u;
 static uint32_t g_ai_hits = 0u;
+static uint32_t g_ai_state_logs = 0u;
+static uint32_t g_ai_active_state_logs = 0u;
+static uint32_t g_ai_inactive_state_logs = 0u;
 
 #define FW_HOOK_HIT_LOG_LIMIT 16u
+#define FW_AI_STATE_LOG_LIMIT 256u
+#define FW_AI_ACTIVE_LOG_LIMIT 512u
+#define FW_AI_INACTIVE_LOG_LIMIT 128u
 static uint64_t g_fallback_tick = 0u;
 static uint64_t g_next_generation = 1u;
 
@@ -647,8 +655,8 @@ static void fw_setdefaults_postfix(patch_handle_t instance, void **args,
     if (!fw_read_vanilla_stats(instance, &npc_type, &vanilla,
                                &boss, &town_npc, &friendly, &active,
                                &failed_field)) {
-        FW_DIAG("setdefaults_read_fail field=%s",
-                failed_field ? failed_field : "unknown");
+        FW_DIAG("setdefaults_baseline_invalid type=%d lifeMax=%d",
+                (int)npc_type, (int)vanilla.life_max);
         return;
     }
     binding->pending = true;
@@ -685,10 +693,27 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
 
     if (!instance || !g_started || !g_runtime.stats_fields_resolved) return;
     binding = fw_get_or_create_binding(instance);
-    if (!binding) return;
+    if (!binding) {
+        if (g_ai_state_logs < FW_AI_STATE_LOG_LIMIT) {
+            ++g_ai_state_logs;
+            FW_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_STATE] binding=none instance=%p", (void *)instance);
+        }
+        return;
+    }
     if (!fw_read_vanilla_stats(instance, &npc_type, &vanilla,
                                &boss, &town_npc, &friendly, &active,
                                &failed_field)) {
+        if (g_ai_state_logs < FW_AI_STATE_LOG_LIMIT) {
+            ++g_ai_state_logs;
+            FW_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_STATE] read_fail=%s pending=%d elite=%d "
+                   "resolved=%d ticks=%u type=unknown",
+                   failed_field ? failed_field : "unknown",
+                   binding->pending ? 1 : 0, binding->elite ? 1 : 0,
+                   binding->roll_resolved ? 1 : 0,
+                   (unsigned)binding->inactive_ticks);
+        }
         FW_DIAG("ai_read_fail field=%s",
                 failed_field ? failed_field : "unknown");
         if (binding->pending) {
@@ -698,6 +723,23 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
             }
         }
         return;
+    }
+
+    if (active
+            ? g_ai_active_state_logs < FW_AI_ACTIVE_LOG_LIMIT
+            : g_ai_inactive_state_logs < FW_AI_INACTIVE_LOG_LIMIT) {
+        if (active) {
+            ++g_ai_active_state_logs;
+        } else {
+            ++g_ai_inactive_state_logs;
+        }
+        FW_LOG(MOD_LOG_LEVEL_INFO,
+               "[AI_STATE] active=%d pending=%d elite=%d resolved=%d "
+               "ticks=%u type=%u",
+               active ? 1 : 0, binding->pending ? 1 : 0,
+               binding->elite ? 1 : 0,
+               binding->roll_resolved ? 1 : 0,
+               (unsigned)binding->inactive_ticks, (unsigned)npc_type);
     }
 
     if (!active && !binding->elite) {
@@ -825,7 +867,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.6-file-beacon setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.7-state-probe setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",

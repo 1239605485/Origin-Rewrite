@@ -1,4 +1,4 @@
-# Origin Rewrite v1.0.6-file-beacon（文件启动标记版）
+# Origin Rewrite v1.0.7-state-probe（AI 状态探测版）
 
 这是从旧 OriginRewrite 实现之外重新搭的干净框架。当前只做“最薄完整核心链路”，
 不含技能 AI、掉落、世界规则、地形天气、多人同步。
@@ -7,8 +7,9 @@
 
 1. 工程能被 GitHub Actions 编译并打包成手机可安装格式。
 2. `NPC.SetDefaults` 只记录待初始化与基准，不抽取精英、不改属性。
-3. 首次 `active=true` 的 `NPC.AI()` 回调才是提交点：一次 roll、一次应用属性。
-4. 属性写入后立即回读并输出 `stat_write / readbackLifeMax`，可用 logcat 独立验证。
+3. AI 回调输出 [AI_STATE] active/pending/elite/resolved/ticks/type，用于确认真实激活入口。
+4. 首次 `active=true` 的 `NPC.AI()` 回调才是提交点：一次 roll、一次应用属性。
+5. 属性写入后立即回读并输出 `stat_write / readbackLifeMax`，可用 logcat 独立验证。
 
 ## 手机包格式（和之前能装机的完全一致）
 
