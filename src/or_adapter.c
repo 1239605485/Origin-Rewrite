@@ -30,26 +30,11 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
 
-/* The TEFManager archive does not always include a mod's logger stream. Keep
- * the normal logger and mirror bounded diagnostic messages to Android logcat
- * so a callback and its native write-back can be verified independently. */
-#if defined(__ANDROID__) && defined(ORIGINREWRITE_USE_ANDROID_LOG)
-#define OR_DIAG_EMIT(...) \
-    __android_log_print(ANDROID_LOG_WARN, "OriginRewrite", __VA_ARGS__)
-#else
-#define OR_DIAG_EMIT(...) \
-    do { fprintf(stderr, "[OriginRewrite] "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } while (0)
-#endif
-
 #define OR_DIAG_LOG(...) \
     do { \
         if (g_adapter.diagnostic_log_count < OR_DIAGNOSTIC_LOG_LIMIT) { \
             ++g_adapter.diagnostic_log_count; \
-            if (mod_logger_write) { \
-                mod_logger_write(MOD_LOG_LEVEL_WARNING, "OriginRewrite", \
-                                 "[OR_DIAG] " __VA_ARGS__); \
-            } \
-            OR_DIAG_EMIT("[OR_DIAG] " __VA_ARGS__); \
+            or_log_write(MOD_LOG_LEVEL_WARNING, "[OR_DIAG] " __VA_ARGS__); \
         } \
     } while (0)
 
@@ -721,12 +706,18 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                    (unsigned)npc_type);
         }
     }
-    /* Crash-isolation gate: the live trace showed the first post-commit
-     * visual call was followed by SIGABRT. Keep the verified stat overlay,
-     * but do not invoke raw color storage, GivenName setter, or Main.NewText
-     * until each ABI is independently proven on this architecture. */
+    /* One-feature gate: color and GivenName remain disabled because their
+     * representation/write path is not proven. Main.NewText is tested alone
+     * in this version against the already-resolved four-argument signature. */
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[VISUAL_SAFE_MODE] color/name/NewText skipped after crash isolation");
+           "[VISUAL_TEST] color/name skipped; NewText test begin");
+    {
+        bool notice_ok = show_elite_notice(spawn.tier, npc_type);
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[ELITE_NOTICE] type=%u tier=%s noticeOk=%s",
+               (unsigned)npc_type, or_elite_tier_name(spawn.tier),
+               notice_ok ? "yes" : "no");
+    }
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
            or_progress_stage_name(progress), or_game_mode_name(mode));
