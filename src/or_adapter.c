@@ -534,6 +534,7 @@ static bool read_vanilla_stats(patch_handle_t instance,
     int32_t life = 0;
     int32_t damage = 0;
     int32_t defense = 0;
+    int32_t ai_style = -1;
     float knockback = 0.0f;
     float scale = 1.0f;
     float slots = 1.0f;
@@ -569,6 +570,7 @@ static bool read_vanilla_stats(patch_handle_t instance,
      * build; active may still be false during that method. AI will re-check it
      * after the object enters the live pool. */
     (void)read_bool(g_adapter.runtime->field_active, instance, &local_active);
+    (void)read_i32(g_adapter.runtime->field_ai_style, instance, &ai_style);
     (void)read_float(g_adapter.runtime->field_npc_slots, instance, &slots);
     (void)read_float(g_adapter.runtime->field_value, instance, &value);
     if (is_boss) *is_boss = false;
@@ -587,6 +589,7 @@ static bool read_vanilla_stats(patch_handle_t instance,
     stats->scale = isfinite(scale) && scale > 0.0f ? scale : 1.0f;
     stats->npc_slots = isfinite(slots) && slots > 0.0f ? slots : 1.0f;
     stats->money = isfinite(value) && value > 0.0f ? (int64_t)llround((double)value) : 0;
+    stats->ai_style = ai_style;
     return true;
 }
 
@@ -703,6 +706,9 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.terrain = (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE};
     context.weather = OR_WEATHER_CLEAR;
     context.is_night = false;
+    /* Store the exact native aiStyle in the record, but keep the behavior
+     * archetype on the proven fallback until the target build's numeric style
+     * mapping is confirmed from a real-device log. */
     context.archetype = OR_AI_ARCHETYPE_MELEE;
     context.max_active_elites = g_adapter.config->max_active_elites;
     context.transient_prepare = false;
@@ -731,6 +737,10 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         return false;
     }
     binding->key = spawn.key;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[AI_TYPE] type=%u aiStyle=%d archetype=%s applied=no reason=native_style_snapshot",
+           (unsigned)npc_type, record->native_ai_style,
+           or_ai_archetype_name(context.archetype));
     {
         bool write_ok = apply_final_stats(instance, &record->final_stats);
         int32_t readback_life_max = -1;
@@ -813,10 +823,10 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
                                &is_friendly, &active, &failed_field)) {
             if (g_adapter.diagnostic_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
                 ++g_adapter.diagnostic_callback_count;
-                OR_DIAG_LOG("setdefaults_callback count=%u type=%u vanillaLife=%lld life=%lld",
+        OR_DIAG_LOG("setdefaults_callback count=%u type=%u vanillaLife=%lld life=%lld aiStyle=%d",
                             (unsigned)g_adapter.diagnostic_callback_count,
                             (unsigned)npc_type, (long long)vanilla.life_max,
-                            (long long)vanilla.life_current);
+                            (long long)vanilla.life_current, vanilla.ai_style);
             }
             binding->pending = true;
             binding->pending_vanilla = vanilla;
@@ -824,9 +834,9 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
             binding->pending_is_boss = is_boss;
             binding->pending_is_town = is_town;
             binding->pending_is_friendly = is_friendly;
-            OR_DIAG_LOG("setdefaults_pending type=%u vanillaLife=%lld life=%lld active=%s",
+            OR_DIAG_LOG("setdefaults_pending type=%u vanillaLife=%lld life=%lld active=%s aiStyle=%d",
                         (unsigned)npc_type, (long long)vanilla.life_max,
-                        (long long)vanilla.life_current, active ? "yes" : "no");
+                        (long long)vanilla.life_current, active ? "yes" : "no", vanilla.ai_style);
         } else {
             OR_DIAG_LOG("setdefaults_read_fail field=%s",
                         failed_field ? failed_field : "unknown");

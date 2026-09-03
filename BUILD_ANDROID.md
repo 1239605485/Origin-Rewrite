@@ -26,14 +26,14 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.3.0-name-display-source 安装后，先确认游戏能稳定启动，再进入世界并等待生成普通敌怪，最后导出 TEFKernel 日志。重点查找
+0.3.1-ai-type-snapshot 安装后，先确认游戏能稳定启动，再进入世界并等待生成普通敌怪，最后导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
 
 同时检查：
 
-- `[MODULE_BEACON] version=0.3.0-name-display-source versionCode=2026090431`
+- `[MODULE_BEACON] version=0.3.1-ai-type-snapshot versionCode=2026090432`
 - `[INIT_STAGE] config_done`
 - `[INIT_STAGE] runtime_probe_done`
 - `[ENTRY_PROBE] SetDefaults candidate=0 params=2 abi=int32,pointer verified=yes`
@@ -41,6 +41,7 @@ bash scripts/package_android_arm64.sh
 - `[OR_DIAG] setdefaults_pending type=...`
 - `[OR_DIAG] stat_write ... readbackLifeMax=ok:...`
 - `[OR_DIAG] ai_callback count=...`, `[NAME_SOURCE] property=FullName` 或 `TypeName`，`[NAME_WRITE] ... prefix=异化体 writeOk=... reason=...` and `Elite committed: concept=重构体 ...`
+- `[AI_TYPE] type=... aiStyle=... archetype=melee applied=no reason=native_style_snapshot`
 
 本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
 请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。

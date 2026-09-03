@@ -22,7 +22,7 @@ static int g_failures = 0;
     } while (0)
 
 static OR_VanillaStats test_vanilla(void) {
-    return (OR_VanillaStats){100, 50, 10, 5, 1.0f, 1.0f, 1.0f, 100};
+    return (OR_VanillaStats){100, 50, 10, 5, 1.0f, 1.0f, 1.0f, 100, -1};
 }
 
 static OR_TerrainSnapshot test_terrain(void) {

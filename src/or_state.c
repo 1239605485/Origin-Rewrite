@@ -65,6 +65,7 @@ bool or_state_acquire_pending(OR_StateStore *store,
     record->lifecycle = OR_LIFECYCLE_PENDING_INIT;
     record->key = (OR_InstanceKey){world_session_id, npc_slot, generation};
     record->npc_type = npc_type;
+    record->native_ai_style = -1;
     record->source = source;
     record->spawn_tick = spawn_tick;
     *out_key = record->key;
@@ -99,6 +100,7 @@ bool or_state_commit_spawn(OR_StateStore *store,
     record->progress = progress;
     record->mode = mode;
     record->tier = tier;
+    record->native_ai_style = vanilla->ai_style;
     record->vanilla = *vanilla;
     record->final_stats = *final_stats;
     record->rules = *rules;

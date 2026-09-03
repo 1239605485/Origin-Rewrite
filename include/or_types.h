@@ -138,6 +138,9 @@ typedef struct OR_VanillaStats {
     float scale;
     float npc_slots;
     int64_t money;
+    /* Exact native NPC.aiStyle observed at activation. Negative means the
+     * optional field was unavailable; it is not interpreted yet. */
+    int32_t ai_style;
 } OR_VanillaStats;
 
 typedef struct OR_FinalStats {

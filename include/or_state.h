@@ -12,6 +12,7 @@ typedef struct OR_EliteRecord {
     OR_EliteLifecycle lifecycle;
     OR_InstanceKey key;
     uint32_t npc_type;
+    int32_t native_ai_style;
     OR_SpawnSource source;
     uint64_t spawn_tick;
     OR_ProgressStage progress;

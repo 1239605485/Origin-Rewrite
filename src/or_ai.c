@@ -28,6 +28,18 @@ OR_AiArchetype or_ai_classify(bool is_melee,
     return OR_AI_ARCHETYPE_MELEE;
 }
 
+const char *or_ai_archetype_name(OR_AiArchetype archetype) {
+    switch (archetype) {
+        case OR_AI_ARCHETYPE_RANGED: return "ranged";
+        case OR_AI_ARCHETYPE_FLYING: return "flying";
+        case OR_AI_ARCHETYPE_WORM: return "worm";
+        case OR_AI_ARCHETYPE_SWARM: return "swarm";
+        case OR_AI_ARCHETYPE_SPECIAL: return "special";
+        case OR_AI_ARCHETYPE_MELEE:
+        default: return "melee";
+    }
+}
+
 static OR_AiTemplate or_primary_for_archetype(OR_AiArchetype archetype) {
     switch (archetype) {
         case OR_AI_ARCHETYPE_RANGED: return OR_AI_TEMPLATE_PROJECTILE_BURST;
