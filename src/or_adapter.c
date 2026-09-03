@@ -303,9 +303,9 @@ static float clamp_float(double value) {
 
 static const char *tier_prefix(OR_EliteTier tier) {
     switch (tier) {
-        case OR_TIER_ALTERED: return "异化种";
-        case OR_TIER_CALAMITY: return "灾变种";
-        case OR_TIER_APOCALYPSE: return "终焉种";
+        case OR_TIER_ALTERED: return "异化体";
+        case OR_TIER_CALAMITY: return "灾变体";
+        case OR_TIER_APOCALYPSE: return "终焉体";
         default: return NULL;
     }
 }
@@ -414,7 +414,7 @@ static bool show_elite_notice(OR_EliteTier tier, uint32_t npc_type) {
     now = time(NULL);
     if (last_notice_time != 0u && (uint64_t)now < last_notice_time + 2u) return false;
     prefix = tier_prefix(tier);
-    if (!prefix || snprintf(message, sizeof(message), "%s精英已出现", prefix) >=
+    if (!prefix || snprintf(message, sizeof(message), "%s已出现", prefix) >=
                        (int)sizeof(message)) return false;
     message_handle = patchlib_string_create(message);
     if (!handle_valid(message_handle)) return false;
@@ -690,16 +690,29 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                     readback_life_ok ? "ok" : "fail", readback_life);
         if (!write_ok) {
             OR_LOG(MOD_LOG_LEVEL_WARNING,
-                   "Elite committed but native stat write was incomplete: type=%u",
+                   "Elite committed: concept=重构体, but native stat write was incomplete: type=%u",
                    (unsigned)npc_type);
         }
     }
-    /* P0 deliberately performs no optional visual, chat, loot, or special-AI
-     * call. Capability discovery remains in or_runtime.c; invocation stays
-     * closed until each complete bridge is separately proven. */
+    /* The name setter is the first player-facing P0-C marker. It runs only
+     * after the real active=true commit and is never retried on later AI ticks.
+     * Color, chat, loot, and special-AI bridges remain closed. */
+    {
+        const char *prefix = tier_prefix(spawn.tier);
+        bool name_ok = write_given_name_marker(instance, spawn.tier);
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[NAME_WRITE] type=%u tier=%s prefix=%s writeOk=%s",
+               (unsigned)npc_type, or_elite_tier_name(spawn.tier),
+               prefix ? prefix : "unavailable", name_ok ? "yes" : "no");
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[REWRITE_MARK] concept=重构体 tier=%s prefix=%s marker=%s",
+               or_elite_tier_name(spawn.tier), prefix ? prefix : "unavailable",
+               name_ok ? "GivenName" : "log-only");
+    }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] visual/loot/special-AI skipped; stats-only P0");
-    OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
+           "[SAFE_MODE] color/NewText/loot/special-AI skipped; name-only P0-C");
+    OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: concept=重构体 prefix=%s type=%u tier=%s progress=%s mode=%s",
+           tier_prefix(spawn.tier) ? tier_prefix(spawn.tier) : "unavailable",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
            or_progress_stage_name(progress), or_game_mode_name(mode));
     return true;
@@ -947,14 +960,14 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                 (unsigned)runtime->method_setdefaults_count);
     if (runtime->method_setdefaults_count == 0u && runtime->setdefaults_probe_seen) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
-               "[ENTRY_PROBE] SetDefaults rejected params=%d arg0=%d arg1=%d expected=int32,bool",
+               "[ENTRY_PROBE] SetDefaults rejected params=%d arg0=%d arg1=%d expected=int32,pointer",
                runtime->setdefaults_probe_param_count,
                (int)runtime->setdefaults_probe_arg_types[0],
                (int)runtime->setdefaults_probe_arg_types[1]);
     }
     for (i = 0; i < runtime->method_setdefaults_count; ++i) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[ENTRY_PROBE] SetDefaults candidate=%u params=2 abi=int32,bool verified=yes",
+               "[ENTRY_PROBE] SetDefaults candidate=%u params=2 abi=int32,pointer verified=yes",
                (unsigned)i);
         if (install_postfix(runtime->method_setdefaults[i], setdefaults_postfix,
                             &runtime->setdefaults_hook_ids[runtime->setdefaults_hook_count])) {
@@ -984,7 +997,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                "[P0_GATE] AI postfix unavailable; SetDefaults capture disabled");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] NPCLoot/color/name/NewText disabled pending P0 lifecycle trace");
+           "[SAFE_MODE] color/NewText/NPCLoot/extra-loot/special-AI disabled; name marker gated after commit");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
     runtime->capabilities.exact_loot_hook_resolved = runtime->loot_hook_id != PATCH_HOOK_INVALID_ID;

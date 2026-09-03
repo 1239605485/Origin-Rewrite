@@ -12,9 +12,11 @@ The native adapter owns only observation and application:
 
 The current P0 Android adapter installs only an exact-ABI `NPC.SetDefaults`
 observation postfix and an exact-ABI parameterless `NPC.AI()` postfix.
-`SetDefaults(int,bool)` records a pending baseline only; the first AI callback
+`SetDefaults(int,pointer)` records a pending baseline only; the first AI callback
 that reads `active=true` is the generation submission boundary. `NPC.NPCLoot()`
-and name, color, and `Main.NewText` calls are probed but not invoked. A pending
+and color/`Main.NewText` calls are probed but not invoked. After the real commit,
+the adapter attempts one `GivenName` write using the player-facing 重构体 prefix.
+A pending
 object that never activates is reclaimed by the AI grace path or object-slot
 reuse, while a committed live record is protected until a verified lifecycle
 cleanup boundary.
@@ -62,9 +64,27 @@ The death adapter should call `or_state_mark_death()` exactly once. After the or
 `or_runtime_field_matches()` checks the instance flag, type and byte size. A missing optional field is represented by a null capability; it is not guessed or replaced by a method lookup based only on parameter count.
 
 `SetDefaults` is discovered by parameter count only as a prefilter; the current
-target profile accepts only the exact instance/void/(int32,bool) signature.
+target profile accepts only the exact instance/void/(int32,pointer) signature
+reported by the target mobile runtime. The pointer parameter is not interpreted
+by the mod; it is used only as part of the ABI gate.
 `AI()` is installed only after the exact instance/void/zero-argument signature
 check. `NPCLoot()` remains a diagnostic-only probe and still requires the
 complete signature before any future installation. Extra item spawning remains
 disabled until `Item.NewItem` and the target-version vanilla item registry are
 both verified.
+
+## Player-facing naming
+
+The display-layer concept is **重构体** (reconstruction entity). Its three
+verified tier labels are:
+
+| Internal tier key | Display prefix |
+|---|---|
+| `altered` | `异化体·` |
+| `calamity` | `灾变体·` |
+| `apocalypse` | `终焉体·` |
+
+Internal enum and persistence keys remain unchanged. The name marker is written
+once after the first real `active=true` commit and is read back before the
+runtime log reports success. Color, chat, loot, and special AI remain separate
+gated capabilities.
