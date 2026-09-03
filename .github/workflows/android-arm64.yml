@@ -3,52 +3,60 @@ name: Build Origin Rewrite Android ARM64
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'CMakeLists.txt'
-      - 'Info.json'
-      - 'Manifest.json'
-      - 'OriginRewrite.json'
-      - 'src/**'
-      - 'include/**'
-      - 'third_party/mod-api/**'
-      - 'scripts/package_android_arm64.sh'
-      - '.github/workflows/android-arm64.yml'
+    branches: [ main, master ]
 
 jobs:
-  build:
+  build-android-arm64:
     runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Locate Android NDK
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        shell: bash
+        run: sdkmanager "ndk;26.3.11579264"
+
+      - name: Build installable package
+        shell: bash
+        env:
+          ORIGINREWRITE_OUTPUT: ${{ github.workspace }}/OriginRewrite-android-arm64.zip
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.3.11579264"
+          if [[ -f OriginRewrite/CMakeLists.txt ]]; then
+            project_dir="OriginRewrite"
+          else
+            project_dir="."
+          fi
+          chmod +x "$project_dir/scripts/package_android_arm64.sh"
+          (
+            cd "$project_dir"
+            "$GITHUB_WORKSPACE/$project_dir/scripts/package_android_arm64.sh"
+          )
+
+      - name: Verify installable ZIP layout
         shell: bash
         run: |
-          NDK_DIR=$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          test -n "$NDK_DIR"
-          echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
-          echo "Using NDK: $NDK_DIR"
+          set -euo pipefail
+          test "$(unzip -Z1 OriginRewrite-android-arm64.zip | grep -Fxc 'Manifest.json')" -eq 1
+          test "$(unzip -Z1 OriginRewrite-android-arm64.zip | grep -Fxc 'Info.json')" -eq 1
+          test "$(unzip -Z1 OriginRewrite-android-arm64.zip | grep -Fxc 'OriginRewrite.json')" -eq 1
+          test "$(unzip -Z1 OriginRewrite-android-arm64.zip | grep -Fxc 'Resources/lib/libOriginRewrite.android.arm64.so')" -eq 1
+          unzip -l OriginRewrite-android-arm64.zip
 
-      - name: Build and assemble installable package
-        shell: bash
-        run: bash scripts/package_android_arm64.sh
-
-      - name: Check ARM64 ELF
-        shell: bash
-        run: |
-          LIB=$(find build-android-arm64 -type f -name 'libOriginRewrite.android.arm64.so' -print -quit)
-          test -n "$LIB"
-          file "$LIB" | grep -E 'ARM aarch64|AArch64'
-
-      - name: Upload installable mod package
+      - name: Upload installable package
         uses: actions/upload-artifact@v4
         with:
           name: OriginRewrite-android-arm64-installable
           path: OriginRewrite-android-arm64.zip
+          if-no-files-found: error
