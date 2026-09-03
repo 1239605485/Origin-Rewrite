@@ -25,10 +25,20 @@ jobs:
 
       - name: Build and package ARM64
         shell: bash
-        run: bash scripts/package_android_arm64.sh
+        run: |
+          set -o pipefail
+          bash scripts/package_android_arm64.sh 2>&1 | tee "${RUNNER_TEMP}/originrewrite-build.log"
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: originrewrite-build-diagnostics
+          path: ${{ runner.temp }}/originrewrite-build.log
+          if-no-files-found: error
 
       - name: Upload installable artifact
         uses: actions/upload-artifact@v4
