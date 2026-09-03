@@ -90,6 +90,7 @@ typedef struct fw_binding {
     bool elite;
     uint32_t inactive_ticks;
     uint64_t generation;
+    uint64_t created_order;
     patch_handle_t instance;
     uint32_t npc_type;
     bool boss;
@@ -107,16 +108,15 @@ static bool g_gameplay_ready = false;
 static uint32_t g_diag_count = 0u;
 static uint32_t g_setdefaults_hits = 0u;
 static uint32_t g_ai_hits = 0u;
-static uint32_t g_ai_state_logs = 0u;
 static uint32_t g_ai_active_state_logs = 0u;
 static uint32_t g_ai_inactive_state_logs = 0u;
 
 #define FW_HOOK_HIT_LOG_LIMIT 16u
-#define FW_AI_STATE_LOG_LIMIT 256u
 #define FW_AI_ACTIVE_LOG_LIMIT 512u
 #define FW_AI_INACTIVE_LOG_LIMIT 128u
 static uint64_t g_fallback_tick = 0u;
 static uint64_t g_next_generation = 1u;
+static uint64_t g_binding_order = 1u;
 
 static bool fw_handle_valid(patch_handle_t handle) {
     if (!handle) return false;
@@ -249,15 +249,84 @@ static fw_binding *fw_find_binding(patch_handle_t instance) {
 
 static fw_binding *fw_get_or_create_binding(patch_handle_t instance) {
     fw_binding *binding;
+    fw_binding *oldest;
     size_t i;
     if (!instance) return NULL;
     binding = fw_find_binding(instance);
-    if (binding) return binding;
+    if (binding) {
+        binding->created_order = g_binding_order++;
+        if (g_binding_order == 0u) g_binding_order = 1u;
+        return binding;
+    }
     for (i = 0; i < FW_MAX_BINDINGS; ++i) {
         if (!g_bindings[i].occupied) {
             memset(&g_bindings[i], 0, sizeof(g_bindings[i]));
             g_bindings[i].occupied = true;
             g_bindings[i].instance = instance;
+            g_bindings[i].created_order = g_binding_order++;
+            if (g_binding_order == 0u) g_binding_order = 1u;
+            return &g_bindings[i];
+        }
+    }
+
+    /* SetDefaults 会遍历大量模板对象；表满时必须保留新激活对象。 */
+    oldest = &g_bindings[0];
+    for (i = 1; i < FW_MAX_BINDINGS; ++i) {
+        if (g_bindings[i].created_order < oldest->created_order) {
+            oldest = &g_bindings[i];
+        }
+    }
+    fw_clear_binding(oldest);
+    oldest->occupied = true;
+    oldest->instance = instance;
+    oldest->created_order = g_binding_order++;
+    if (g_binding_order == 0u) g_binding_order = 1u;
+    return oldest;
+}
+
+static void fw_binding_store_baseline(fw_binding *binding,
+                                      const fw_vanilla_stats *vanilla,
+                                      uint32_t npc_type, bool boss,
+                                      bool town_npc, bool friendly) {
+    if (!binding || !vanilla) return;
+    binding->pending = true;
+    binding->npc_type = npc_type;
+    binding->boss = boss;
+    binding->town_npc = town_npc;
+    binding->friendly = friendly;
+    binding->vanilla = *vanilla;
+}
+
+static bool fw_ai_log_state_slot(bool active) {
+    if (active) {
+        if (g_ai_active_state_logs >= FW_AI_ACTIVE_LOG_LIMIT) return false;
+        ++g_ai_active_state_logs;
+    } else {
+        if (g_ai_inactive_state_logs >= FW_AI_INACTIVE_LOG_LIMIT) return false;
+        ++g_ai_inactive_state_logs;
+    }
+    return true;
+}
+
+static void fw_ai_log_state(patch_handle_t instance, const fw_binding *binding,
+                            bool active, bool have_stats, uint32_t npc_type,
+                            const char *failed_field) {
+    if (!fw_ai_log_state_slot(active)) return;
+    if (binding) {
+        FW_LOG(MOD_LOG_LEVEL_INFO,
+               "[AI_STATE] active=%d pending=%d elite=%d resolved=%d "
+               "ticks=%u type=%u",
+               active ? 1 : 0, binding->pending ? 1 : 0,
+               binding->elite ? 1 : 0, binding->roll_resolved ? 1 : 0,
+               (unsigned)binding->inactive_ticks, (unsigned)npc_type);
+    } else {
+        FW_LOG(MOD_LOG_LEVEL_INFO,
+               "[AI_STATE] binding=none active=%d haveStats=%d type=%u "
+               "readFail=%s instance=%p",
+               active ? 1 : 0, have_stats ? 1 : 0, (unsigned)npc_type,
+               failed_field ? failed_field : "none", (void *)instance);
+    }
+}
             return &g_bindings[i];
         }
     }
@@ -617,7 +686,7 @@ static void fw_commit_elite(fw_binding *binding, patch_handle_t instance,
 
 static void fw_setdefaults_postfix(patch_handle_t instance, void **args,
                                    void *result,
-                                   const patch_method_signature_t *sig_info) {
+    const patch_method_signature_t *sig_info) {
     fw_binding *binding;
     fw_vanilla_stats vanilla;
     uint32_t npc_type = 0;
@@ -657,14 +726,11 @@ static void fw_setdefaults_postfix(patch_handle_t instance, void **args,
                                &failed_field)) {
         FW_DIAG("setdefaults_baseline_invalid type=%d lifeMax=%d",
                 (int)npc_type, (int)vanilla.life_max);
+        fw_clear_binding(binding);
         return;
     }
-    binding->pending = true;
-    binding->npc_type = npc_type;
-    binding->boss = boss;
-    binding->town_npc = town_npc;
-    binding->friendly = friendly;
-    binding->vanilla = vanilla;
+    fw_binding_store_baseline(binding, &vanilla, npc_type, boss,
+                              town_npc, friendly);
     FW_DIAG("setdefaults_pending type=%u vanillaLife=%lld life=%lld",
             (unsigned)npc_type, (long long)vanilla.life_max,
             (long long)vanilla.life);
@@ -680,6 +746,7 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
     bool town_npc = false;
     bool friendly = false;
     bool active = false;
+    bool have_stats = false;
     const char *failed_field = NULL;
 
     ++g_ai_hits;
@@ -692,28 +759,27 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
     (void)sig_info;
 
     if (!instance || !g_started || !g_runtime.stats_fields_resolved) return;
-    binding = fw_get_or_create_binding(instance);
+    have_stats = fw_read_vanilla_stats(instance, &npc_type, &vanilla,
+                                       &boss, &town_npc, &friendly, &active,
+                                       &failed_field);
+    binding = fw_find_binding(instance);
+
+    /* 表被 SetDefaults 模板对象占满时，真实激活对象必须在 AI 阶段恢复绑定。 */
+    if (!binding && have_stats && active) {
+        binding = fw_get_or_create_binding(instance);
+        fw_binding_store_baseline(binding, &vanilla, npc_type, boss,
+                                  town_npc, friendly);
+    }
+
     if (!binding) {
-        if (g_ai_state_logs < FW_AI_STATE_LOG_LIMIT) {
-            ++g_ai_state_logs;
-            FW_LOG(MOD_LOG_LEVEL_INFO,
-                   "[AI_STATE] binding=none instance=%p", (void *)instance);
-        }
+        fw_ai_log_state(instance, NULL, active, have_stats, npc_type,
+                        failed_field);
         return;
     }
-    if (!fw_read_vanilla_stats(instance, &npc_type, &vanilla,
-                               &boss, &town_npc, &friendly, &active,
-                               &failed_field)) {
-        if (g_ai_state_logs < FW_AI_STATE_LOG_LIMIT) {
-            ++g_ai_state_logs;
-            FW_LOG(MOD_LOG_LEVEL_INFO,
-                   "[AI_STATE] read_fail=%s pending=%d elite=%d "
-                   "resolved=%d ticks=%u type=unknown",
-                   failed_field ? failed_field : "unknown",
-                   binding->pending ? 1 : 0, binding->elite ? 1 : 0,
-                   binding->roll_resolved ? 1 : 0,
-                   (unsigned)binding->inactive_ticks);
-        }
+
+    if (!have_stats) {
+        fw_ai_log_state(instance, binding, false, false, npc_type,
+                        failed_field);
         FW_DIAG("ai_read_fail field=%s",
                 failed_field ? failed_field : "unknown");
         if (binding->pending) {
@@ -725,22 +791,7 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
         return;
     }
 
-    if (active
-            ? g_ai_active_state_logs < FW_AI_ACTIVE_LOG_LIMIT
-            : g_ai_inactive_state_logs < FW_AI_INACTIVE_LOG_LIMIT) {
-        if (active) {
-            ++g_ai_active_state_logs;
-        } else {
-            ++g_ai_inactive_state_logs;
-        }
-        FW_LOG(MOD_LOG_LEVEL_INFO,
-               "[AI_STATE] active=%d pending=%d elite=%d resolved=%d "
-               "ticks=%u type=%u",
-               active ? 1 : 0, binding->pending ? 1 : 0,
-               binding->elite ? 1 : 0,
-               binding->roll_resolved ? 1 : 0,
-               (unsigned)binding->inactive_ticks, (unsigned)npc_type);
-    }
+    fw_ai_log_state(instance, binding, active, have_stats, npc_type, NULL);
 
     if (!active && !binding->elite) {
         /* 模板对象不会激活；给几次 AI 宽限后清掉，避免长期占槽。 */
@@ -784,6 +835,7 @@ bool fw_core_init(void) {
     g_setdefaults_hits = 0u;
     g_ai_hits = 0u;
     g_fallback_tick = 0u;
+    g_binding_order = 1u;
     g_gameplay_ready = false;
 
     runtime_ok = fw_runtime_probe(&g_runtime);
@@ -867,7 +919,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.7-state-probe setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.8-binding-fix setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
@@ -877,6 +929,7 @@ bool fw_core_init(void) {
 
 void fw_core_shutdown(void) {
     memset(g_bindings, 0, sizeof(g_bindings));
+    g_binding_order = 1u;
     fw_runtime_cleanup(&g_runtime);
     g_started = false;
     g_gameplay_ready = false;
