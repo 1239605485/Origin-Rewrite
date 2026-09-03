@@ -1,4 +1,4 @@
-# Origin Rewrite v1.0.8-binding-fix（绑定修复版）
+# Origin Rewrite v1.0.9-compile-fix（编译修复版）
 
 这是从旧 OriginRewrite 实现之外重新搭的干净框架。当前只做“最薄完整核心链路”，
 不含技能 AI、掉落、世界规则、地形天气、多人同步。

@@ -235,6 +235,8 @@ static bool fw_read_u64(patch_handle_t field, patch_handle_t instance,
     return false;
 }
 
+static void fw_clear_binding(fw_binding *binding);
+
 static fw_binding *fw_find_binding(patch_handle_t instance) {
     size_t i;
     if (!instance) return NULL;
@@ -919,7 +921,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.8-binding-fix setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.9-compile-fix setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
