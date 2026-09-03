@@ -2,7 +2,7 @@
 
 这是基于 v0.4 设计文档的 C11 实现。项目采用“原版 NPC + 运行时精英状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.2.1` 恢复正式配置：普通/专家/大师/天顶精英基础概率为 20%/30%/40%/50%，旅行模式沿用普通概率；属性只在一次精英提交中从原版基准计算，已移除 100% 概率和 1.25 倍强制诊断写入。单机 SetDefaults 的权限判定按已验证参考实现处理，未知的 `Main.netMode` 读取不会阻断属性覆盖。
+当前 `0.2.2` 保持正式配置：普通/专家/大师/天顶精英基础概率为 20%/30%/40%/50%，旅行模式沿用普通概率；属性只在一次精英提交中从原版基准计算，已移除 100% 概率和 1.25 倍强制诊断写入。单机 SetDefaults 的权限判定按已验证参考实现处理，未知的 `Main.netMode` 读取不会阻断属性覆盖。新增启动确认和首次 SetDefaults 回调诊断日志。
 
 诊断记录包含 `vanillaLife`、`finalLife`、`writeOk`、`readbackLifeMax` 和 `readbackLife`。其中 `readbackLifeMax` 与 `finalLife` 相同，才表示最大生命确实写入成功；如果日志包没有包含模组输出，可从 Android logcat 过滤 `OriginRewrite` 标签。
 
