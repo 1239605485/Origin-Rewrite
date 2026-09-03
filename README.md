@@ -2,7 +2,7 @@
 
 这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.3.1-ai-type-snapshot`（versionCode `2026090432`）在已验证的名称显示版上增加真实 `NPC.aiStyle` 观测：只在首次 `active=true` 的 AI 提交点读取并保存原始数值，写入 `[AI_TYPE]` 日志；在目标手机版实际数值完成确认前，archetype 继续安全回退为 `melee`，不改变原版 AI 行为。`SetDefaults` 仍只记录 pending 和原版基准，名称仍只写入一次“前缀·原名”；颜色、`Main.NewText`、NPCLoot、额外掉落和未经确认的特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+当前 `0.3.2-ai-archetype`（versionCode `2026090433`）在已验证的名称显示版上接入真实 `NPC.aiStyle`：只在首次 `active=true` 的 AI 提交点读取并保存原始数值；对已确认的 `2/5/14` 飞行类、`6` 蠕虫类和 `3` Fighter 类使用兼容 archetype，未知数值安全回退为 `melee`，并写入 `[AI_TYPE]` 日志。此步只影响纯核心的兼容预算选择，不调用新投射物、召唤或瞬移桥接，不改变原版 AI 行为。`SetDefaults` 仍只记录 pending 和原版基准，名称仍只写入一次“前缀·原名”；颜色、`Main.NewText`、NPCLoot、额外掉落和未经确认的特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
 
 玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
 
@@ -21,7 +21,7 @@
 - `or_loot.c`：原版掉落保留、单额外奖励槽、阶段奖励分支、金币唯一后端边界。
 - `or_item_registry.c`：只允许显式、已确认的原版物品白名单，拒绝 Boss 袋、Boss 召唤物、未来内容和关键进度物品。
 - `or_runtime.c`：TEFKernel PatchLib 的字段精确检查、`SetDefaults` 方法签名精确检查、移动端目标入口探测，以及名称/颜色/公告能力探测。
-- `or_adapter.c`：只安装精确校验的 `NPC.SetDefaults(int,pointer)` 观察 Hook 和 `NPC.AI()` Postfix；SetDefaults 只保存 pending，AI 首次确认 active 后才提交；提交后保存真实 `aiStyle` 快照并记录 `[AI_TYPE]`，但 archetype 在手机版数值确认前回退为 melee；名称仅尝试一次，颜色、公告、NPCLoot、额外掉落和未经确认的特殊 AI 仍关闭。
+- `or_adapter.c`：只安装精确校验的 `NPC.SetDefaults(int,pointer)` 观察 Hook 和 `NPC.AI()` Postfix；SetDefaults 只保存 pending，AI 首次确认 active 后才提交；提交后保存真实 `aiStyle` 快照，并按已确认样式选择兼容 archetype，未知样式回退为 melee；名称仅尝试一次，颜色、公告、NPCLoot、额外掉落和未经确认的特殊 AI 仍关闭。
 - `or_world.c`：世界规则的版本、配置哈希、规则种子和世界种子指纹校验。
 
 当前 P0 版本只有在目标运行时实测的 `SetDefaults(int,pointer)` 与无参数 `AI()` 均通过精确 ABI 校验并成功安装时才启用生成观察链路；任一入口不可用则关闭重构体升级，不猜测其他重载。
@@ -93,8 +93,8 @@ OriginRewrite-android-arm64.zip
 
 1. 对 `Item.NewItem` 完成目标版本精确签名校验和原版物品/装备/饰品/宝匣白名单；在验证完成前不启用额外掉落。
 2. 对死亡入口做前后顺序验证；在顺序不确定时继续只保留原版掉落。
-3. 用手机日志确认不同 NPC 的 `[AI_TYPE] aiStyle=`，再建立目标版本的保守 archetype 映射。
-4. 映射稳定后接入真实玩家位置、地形、天气快照；当前安全默认值是地表森林、晴天、白天。
+3. 用手机日志继续确认更多 NPC 的 `[AI_TYPE]`，未知样式保持回退，不直接猜测。
+4. archetype 稳定后接入真实玩家位置、地形、天气快照；当前安全默认值是地表森林、晴天、白天。
 5. 在手机端测试普通、稀有、传奇三档体型、金币、属性和多人客户端不重复结算。
 
 `Resources/config/README.md` 说明了为什么资源 JSON 在原生资源接口确认前不会被伪装成“已加载”。

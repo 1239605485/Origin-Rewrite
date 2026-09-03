@@ -40,6 +40,23 @@ const char *or_ai_archetype_name(OR_AiArchetype archetype) {
     }
 }
 
+OR_AiArchetype or_ai_classify_native_style(int32_t ai_style, bool *known) {
+    if (known) *known = true;
+    switch (ai_style) {
+        case 2:  /* Demon Eye-compatible flying family. */
+        case 5:  /* Flying AI. */
+        case 14: /* Bat AI; treated as flying for compatibility budgeting. */
+            return OR_AI_ARCHETYPE_FLYING;
+        case 6:  /* Worm AI. */
+            return OR_AI_ARCHETYPE_WORM;
+        case 3:  /* Fighter AI. */
+            return OR_AI_ARCHETYPE_MELEE;
+        default:
+            if (known) *known = false;
+            return OR_AI_ARCHETYPE_MELEE;
+    }
+}
+
 static OR_AiTemplate or_primary_for_archetype(OR_AiArchetype archetype) {
     switch (archetype) {
         case OR_AI_ARCHETYPE_RANGED: return OR_AI_TEMPLATE_PROJECTILE_BURST;

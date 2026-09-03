@@ -14,6 +14,7 @@ OR_AiArchetype or_ai_classify(bool is_melee,
                               bool is_swarm,
                               bool is_special);
 const char *or_ai_archetype_name(OR_AiArchetype archetype);
+OR_AiArchetype or_ai_classify_native_style(int32_t ai_style, bool *known);
 bool or_ai_build_plan(const OR_Config *config,
                       OR_ProgressStage progress,
                       OR_EliteTier tier,

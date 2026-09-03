@@ -23,10 +23,12 @@ object that never activates is reclaimed by the AI grace path or object-slot
 reuse, while a committed live record is protected until a verified lifecycle
 cleanup boundary.
 
-The current adapter also snapshots the exact native `NPC.aiStyle` integer in
-the committed record and emits it as `[AI_TYPE]`. Until target-version device
-logs establish a safe numeric mapping, the gameplay archetype remains the
-melee fallback; this observation does not alter native AI behavior.
+The current adapter snapshots the exact native `NPC.aiStyle` integer in the
+committed record and emits it as `[AI_TYPE]`. The verified compatibility table
+maps styles 2, 5 and 14 to the flying archetype, style 6 to worm, and style 3
+to melee/Fighter. Unknown styles remain on the melee fallback. This mapping
+only selects a pure-core compatibility budget; it does not add a projectile,
+summon or teleport bridge to native AI.
 
 The pure core owns all decisions. It never calls PatchLib, allocates native objects, spawns an item, or assumes a Terraria method exists.
 

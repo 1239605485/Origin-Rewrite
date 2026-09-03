@@ -663,6 +663,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     OR_GameMode mode;
     bool single_player = false;
     bool authority_known = false;
+    bool archetype_known = false;
+    OR_AiArchetype native_archetype;
     uint64_t session;
     uint64_t tick;
     const OR_EliteRecord *record;
@@ -706,10 +708,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.terrain = (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE};
     context.weather = OR_WEATHER_CLEAR;
     context.is_night = false;
-    /* Store the exact native aiStyle in the record, but keep the behavior
-     * archetype on the proven fallback until the target build's numeric style
-     * mapping is confirmed from a real-device log. */
-    context.archetype = OR_AI_ARCHETYPE_MELEE;
+    native_archetype = or_ai_classify_native_style(vanilla->ai_style, &archetype_known);
+    context.archetype = archetype_known ? native_archetype : OR_AI_ARCHETYPE_MELEE;
     context.max_active_elites = g_adapter.config->max_active_elites;
     context.transient_prepare = false;
     context.vanilla = *vanilla;
@@ -738,9 +738,11 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     }
     binding->key = spawn.key;
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[AI_TYPE] type=%u aiStyle=%d archetype=%s applied=no reason=native_style_snapshot",
+           "[AI_TYPE] type=%u aiStyle=%d archetype=%s applied=%s reason=%s",
            (unsigned)npc_type, record->native_ai_style,
-           or_ai_archetype_name(context.archetype));
+           or_ai_archetype_name(context.archetype),
+           archetype_known ? "yes" : "no",
+           archetype_known ? "verified_ai_style_mapping" : "unknown_ai_style_fallback");
     {
         bool write_ok = apply_final_stats(instance, &record->final_stats);
         int32_t readback_life_max = -1;

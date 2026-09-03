@@ -288,6 +288,20 @@ static void test_spawn_authority(void) {
                                       config.same_npc_cooldown_ticks));
 }
 
+static void test_native_ai_style_mapping(void) {
+    bool known = false;
+    CHECK(or_ai_classify_native_style(14, &known) == OR_AI_ARCHETYPE_FLYING);
+    CHECK(known);
+    CHECK(or_ai_classify_native_style(5, &known) == OR_AI_ARCHETYPE_FLYING);
+    CHECK(known);
+    CHECK(or_ai_classify_native_style(6, &known) == OR_AI_ARCHETYPE_WORM);
+    CHECK(known);
+    CHECK(or_ai_classify_native_style(3, &known) == OR_AI_ARCHETYPE_MELEE);
+    CHECK(known);
+    CHECK(or_ai_classify_native_style(999, &known) == OR_AI_ARCHETYPE_MELEE);
+    CHECK(!known);
+}
+
 static void test_world_persistence_and_item_gate(void) {
     OR_Config config;
     OR_WorldRuleState world;
@@ -333,6 +347,7 @@ int main(void) {
     test_ai_gates();
     test_state_and_loot();
     test_spawn_authority();
+    test_native_ai_style_mapping();
     test_world_persistence_and_item_gate();
     if (g_failures != 0) {
         fprintf(stderr, "%d test(s) failed\n", g_failures);
