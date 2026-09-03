@@ -17,9 +17,9 @@ __attribute__((visibility("default"))) void (*mod_logger_write)(
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026090410,
+    .version_code = 2026090412,
     .api_version = 1,
-    .version = "1.0.9-compile-fix"
+    .version = "1.0.11-ci-hardening"
 };
 
 static void fw_init_mod(kernel_mod_handle_t *handle) {
@@ -33,8 +33,8 @@ static void fw_init_mod(kernel_mod_handle_t *handle) {
         {
             FILE *probe = fopen(log_path, "a");
             if (probe) {
-                fputs("[MODULE_BEACON] version=1.0.9-compile-fix "
-                      "versionCode=2026090410\n", probe);
+                fputs("[MODULE_BEACON] version=1.0.11-ci-hardening "
+                      "versionCode=2026090412\n", probe);
                 fflush(probe);
                 fclose(probe);
             }
@@ -44,14 +44,14 @@ static void fw_init_mod(kernel_mod_handle_t *handle) {
     /* This beacon is independent of the optional TEF module logger.  It lets
      * logcat prove which binary was loaded before any runtime probe runs. */
     __android_log_print(ANDROID_LOG_INFO, "OriginRewrite",
-                        "[MODULE_BEACON] version=1.0.9-compile-fix "
-                        "versionCode=2026090410");
+                        "[MODULE_BEACON] version=1.0.11-ci-hardening "
+                        "versionCode=2026090412");
 #endif
     ready = fw_core_init();
     if (mod_logger_write) {
         mod_logger_write(MOD_LOG_LEVEL_INFO, "OriginRewrite",
-                         "[MODULE_BEACON] version=1.0.9-compile-fix "
-                         "versionCode=2026090410 initialized; "
+                         "[MODULE_BEACON] version=1.0.11-ci-hardening "
+                         "versionCode=2026090412 initialized; "
                          "gameplay gate=%s",
                          ready ? "on" : "off");
     }

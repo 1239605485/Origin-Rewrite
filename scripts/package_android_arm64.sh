@@ -14,16 +14,20 @@ echo "package_android_arm64: ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT:-<empty>}"
 echo "package_android_arm64: ndk_dir=${ndk_dir:-<empty>}"
 echo "package_android_arm64: cmake=$(command -v "${cmake_bin:-cmake}" || true)"
 if [[ -z "$ndk_dir" ]]; then
-    echo "ANDROID_NDK_HOME or ANDROID_NDK_ROOT is required" >&2
+    echo "BUILD_ERROR: ANDROID_NDK_HOME or ANDROID_NDK_ROOT is required" >&2
     exit 2
 fi
 
 toolchain="$ndk_dir/build/cmake/android.toolchain.cmake"
 if [[ ! -f "$toolchain" ]]; then
-    echo "Android toolchain not found: $toolchain" >&2
+    echo "BUILD_ERROR: Android toolchain not found: $toolchain" >&2
     echo "Expected path: $ndk_dir/build/cmake/android.toolchain.cmake" >&2
+    echo "NDK directory listing:" >&2
+    ls -la "$ndk_dir" >&2 || true
     exit 2
 fi
+
+echo "package_android_arm64: android.toolchain=$toolchain"
 
 "$cmake_bin" -S "$project_root" -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -37,7 +41,9 @@ fi
 library_path="$(find "$build_dir" -type f \
     -name 'libOriginRewrite.android.arm64.so' -print -quit)"
 if [[ -z "$library_path" ]]; then
-    echo "Expected ARM64 library was not produced: libOriginRewrite.android.arm64.so" >&2
+    echo "BUILD_ERROR: Expected ARM64 library was not produced: libOriginRewrite.android.arm64.so" >&2
+    echo "Build files found under: $build_dir" >&2
+    find "$build_dir" -maxdepth 4 -type f \( -name '*.a' -o -name '*.so' -o -name 'CMakeError.log' \) -print >&2 || true
     exit 3
 fi
 

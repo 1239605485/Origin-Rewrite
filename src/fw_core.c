@@ -329,11 +329,6 @@ static void fw_ai_log_state(patch_handle_t instance, const fw_binding *binding,
                failed_field ? failed_field : "none", (void *)instance);
     }
 }
-            return &g_bindings[i];
-        }
-    }
-    return NULL;
-}
 
 static void fw_clear_binding(fw_binding *binding) {
     if (!binding) return;
@@ -921,7 +916,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.9-compile-fix setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.11-ci-hardening setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
