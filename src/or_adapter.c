@@ -29,6 +29,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_LOG(level, ...) do { or_log_write((level), __VA_ARGS__); } while (0)
 
 #define OR_DIAGNOSTIC_LOG_LIMIT 256u
+#define OR_AI_DIAGNOSTIC_SAMPLE_LIMIT 8u
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -714,13 +715,22 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.transient_prepare = false;
     context.vanilla = *vanilla;
     memset(&spawn, 0, sizeof(spawn));
-    if (!or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
-                             session ^ (uint64_t)(uintptr_t)instance ^ tick, &spawn) ||
-        !spawn.committed) {
+    {
+        bool spawn_ok = or_spawn_try_commit(g_adapter.config, g_adapter.state, &context,
+                                             session ^ (uint64_t)(uintptr_t)instance ^ tick,
+                                             &spawn);
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[ROLL] type=%u baseChance=%.3f effectiveChance=%.3f passed=%s committed=%s reason=%s",
+               (unsigned)npc_type, (double)spawn.base_chance,
+               (double)spawn.effective_chance, spawn.chance_passed ? "yes" : "no",
+               spawn_ok && spawn.committed ? "yes" : "no",
+               or_spawn_reject_reason_name(spawn.reason));
+        if (!spawn_ok || !spawn.committed) {
         OR_DIAG_LOG("commit_fail type=%u vanillaLife=%lld reason=%s",
                     (unsigned)npc_type, (long long)vanilla->life_max,
                     or_spawn_reject_reason_name(spawn.reason));
-        return false;
+            return false;
+        }
     }
     binding->elite = true;
     binding->pending = false;
@@ -865,9 +875,9 @@ static void ai_postfix(
     (void)result;
     (void)sig_info;
     if (!instance || !g_adapter.installed || !g_adapter.config || !g_adapter.state) return;
-    if (g_adapter.diagnostic_ai_callback_count < OR_DIAGNOSTIC_LOG_LIMIT) {
+    if (g_adapter.diagnostic_ai_callback_count < OR_AI_DIAGNOSTIC_SAMPLE_LIMIT) {
         ++g_adapter.diagnostic_ai_callback_count;
-        OR_LOG(MOD_LOG_LEVEL_WARNING, "[OR_DIAG] ai_callback count=%u instance=%p",
+        OR_LOG(MOD_LOG_LEVEL_WARNING, "[OR_DIAG] ai_callback sample=%u instance=%p",
                (unsigned)g_adapter.diagnostic_ai_callback_count, (void *)instance);
     }
     binding = get_or_create_binding(instance);

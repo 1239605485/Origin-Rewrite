@@ -133,13 +133,17 @@ bool or_spawn_try_commit(const OR_Config *config,
     }
     progress_config = &config->progress[context->progress];
     mode_config = &config->modes[context->mode];
+    out_result->base_chance = mode_config->elite_chance;
     chance = mode_config->elite_chance * rules.elite_chance_multiplier;
     if (context->mode == OR_MODE_JOURNEY) chance *= config->journey_probability_multiplier;
     if (chance > 1.0f) chance = 1.0f;
+    if (chance < 0.0f) chance = 0.0f;
+    out_result->effective_chance = chance;
     if (!or_prng_chance(&rng, chance)) {
         out_result->reason = OR_SPAWN_REJECT_CHANCE;
         return false;
     }
+    out_result->chance_passed = true;
 
     effective_mode = or_config_effective_stats_mode(context->mode);
     for (i = 0; i < OR_TIER_COUNT; ++i) {

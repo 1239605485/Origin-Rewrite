@@ -52,6 +52,9 @@ typedef struct OR_SpawnContext {
 typedef struct OR_SpawnResult {
     bool committed;
     OR_SpawnRejectReason reason;
+    float base_chance;
+    float effective_chance;
+    bool chance_passed;
     OR_InstanceKey key;
     OR_EliteTier tier;
     OR_EliteRecord record;
