@@ -1,11 +1,23 @@
-# Origin Rewrite Android ARM64 构建说明
+# Android ARM64 构建与安装
 
-手机版 TEFManager 读取的是 ZIP 根目录中的 `Manifest.json`。因此需要区分：
+## 需要的东西
 
-- 源码工程包：包含 `CMakeLists.txt`、`src/`、`include/` 和 `third_party/`；
-- 可安装包：只包含元数据和已编译库，不包含外层源码目录。
+- GitHub Actions（推荐）或本机 Android NDK + CMake。
+- Android NDK 路径通过 `ANDROID_NDK_HOME` 或 `ANDROID_NDK_ROOT` 提供。
 
-## 可安装包结构
+## GitHub Actions
+
+仓库根目录保留 `.github/workflows/android-arm64.yml`，运行
+`Build Origin Rewrite Android ARM64`。下载 artifact
+`OriginRewrite-android-arm64-installable`，直接导入 TEFManager。
+
+## 本机构建
+
+```bash
+ANDROID_NDK_HOME=/path/to/ndk bash scripts/package_android_arm64.sh
+```
+
+成功后在工程根目录得到 `OriginRewrite-android-arm64.zip`：
 
 ```text
 OriginRewrite-android-arm64.zip
@@ -17,29 +29,27 @@ OriginRewrite-android-arm64.zip
       └─ libOriginRewrite.android.arm64.so
 ```
 
-## 本地构建
+## 手机报“无法安装”排查
 
-需要 CMake、Android SDK 和 Android NDK。环境变量使用 `ANDROID_NDK_HOME` 或
-`ANDROID_NDK_ROOT` 指向 NDK 根目录：
+1. 导入的必须是上面这种根目录 ZIP，不能是源码目录打包的 ZIP。
+2. ZIP 根目录必须有 `Manifest.json`，内容 `type=Mod`、
+   `file=OriginRewrite.json`、`parentLoader=eternal.future.kernelloader`。
+3. `Resources/lib/` 下必须有编译好的
+   `libOriginRewrite.android.arm64.so`，不能放源码或空目录。
+4. 版本、ABI 和 `targetGameVersion` 需与 TEFManager/Terraria 匹配。
 
-```bash
-bash scripts/package_android_arm64.sh
+## 当前框架顺序
+
+```text
+NPC.SetDefaults Postfix
+   只记录 PendingInit + 基准
+        ↓
+NPC.AI() 首次 active=true
+   执行 SpawnCommitted（一次 roll + 一次属性应用）
+        ↓
+stat_write / readbackLifeMax 回读验证
+        ↓
+（下一层：名称/颜色、AI 状态机、掉落）
 ```
 
-0.2.2 正式配置版安装后，进入世界并等待生成普通敌怪，再导出 TEFKernel 日志。重点查找
-`[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
-`readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
-输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
-
-脚本固定使用 `arm64-v8a` 和 `android-24`，并在打包前检查四个根目录文件以及
-`Resources/lib/libOriginRewrite.android.arm64.so` 是否存在。
-
-## GitHub Actions
-
-把本目录中的全部内容上传到仓库根目录，保留
-`.github/workflows/android-arm64.yml`，然后在 Actions 中运行
-`Build Origin Rewrite Android ARM64`。下载名为
-`OriginRewrite-android-arm64-installable` 的工件后，直接将 ZIP 导入 TEFManager。
-
-不能把包含外层 `OriginRewrite/` 文件夹的源码 ZIP 直接导入手机端；那种 ZIP
-没有根目录 `Manifest.json`，也没有已编译的 Android ARM64 动态库。
+禁止回到“SetDefaults 里直接提交并宣称精英已生效”的旧写法。
