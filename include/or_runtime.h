@@ -22,6 +22,7 @@ typedef struct OR_RuntimeCapabilities {
     bool exact_loot_hook_resolved;
     bool ai_dispatcher_known_target;
     bool color_marker_ready;
+    bool color_marker_probe_ready;
     bool given_name_property_ready;
     bool new_text_ready;
     bool gameplay_enabled;

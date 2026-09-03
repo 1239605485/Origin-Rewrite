@@ -126,14 +126,12 @@ static patch_handle_t or_resolve_marker_field(patch_handle_t type,
         or_release_handle(field);
         return PATCH_NULL;
     }
-    /* Terraria 1.4.5.6.4 reports NPC.color as an 8-byte PATCH_POINTER. The
-     * pointed storage is not a proven writable inline Color value; writing
-     * four bytes there can corrupt the native object and crash IL2CPP later.
-     * Keep this capability disabled until the actual Color representation is
-     * proven. */
+    /* Terraria 1.4.5.6.4 reports NPC.color as an 8-byte PATCH_POINTER. Keep
+     * the handle for a read-only diagnostic probe, but do not mark it as a
+     * writable color capability until the pointed representation is proven. */
     if (!patchlib_field_is_instance(field) || patchlib_field_is_static(field) ||
         patchlib_field_get_type(field) != PATCH_POINTER ||
-        patchlib_field_get_size(field) != 4u) {
+        patchlib_field_get_size(field) != 8u) {
         or_release_handle(field);
         return PATCH_NULL;
     }
@@ -163,7 +161,8 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
 
     if (!runtime) return;
     runtime->field_color = or_resolve_marker_field(runtime->npc_type, "color");
-    runtime->capabilities.color_marker_ready = runtime->field_color != PATCH_NULL;
+    runtime->capabilities.color_marker_probe_ready = runtime->field_color != PATCH_NULL;
+    runtime->capabilities.color_marker_ready = false;
 
     if (patchlib_type_get_property && patchlib_property_get_get_method &&
         patchlib_property_get_set_method && patchlib_method_get_signature &&
