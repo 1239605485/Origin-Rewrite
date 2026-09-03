@@ -18,11 +18,17 @@ jobs:
         with:
           ndk-version: r26d
 
+      - name: Show NDK path
+        run: |
+          echo "ndk-path=${{ steps.setup-ndk.outputs.ndk-path }}"
+          ls -1 "${{ steps.setup-ndk.outputs.ndk-path }}" || true
+
       - name: Build and package ARM64
         shell: bash
         run: bash scripts/package_android_arm64.sh
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Upload installable artifact
         uses: actions/upload-artifact@v4
