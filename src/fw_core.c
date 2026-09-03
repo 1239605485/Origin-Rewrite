@@ -805,7 +805,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.4-hook-observable setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.5-kernel-log-beacon setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
