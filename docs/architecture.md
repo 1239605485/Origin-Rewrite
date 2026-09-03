@@ -15,7 +15,9 @@ observation postfix and an exact-ABI parameterless `NPC.AI()` postfix.
 `SetDefaults(int,pointer)` records a pending baseline only; the first AI callback
 that reads `active=true` is the generation submission boundary. `NPC.NPCLoot()`
 and color/`Main.NewText` calls are probed but not invoked. After the real commit,
-the adapter attempts one `GivenName` write using the player-facing 重构体 prefix.
+the adapter obtains the original display name from a strictly checked
+`FullName`/`TypeName` getter when `GivenName` is empty, then attempts one
+`GivenName` write using the player-facing 重构体 prefix.
 A pending
 object that never activates is reclaimed by the AI grace path or object-slot
 reuse, while a committed live record is protected until a verified lifecycle
@@ -87,4 +89,5 @@ verified tier labels are:
 Internal enum and persistence keys remain unchanged. The name marker is written
 once after the first real `active=true` commit and is read back before the
 runtime log reports success. Color, chat, loot, and special AI remain separate
-gated capabilities.
+gated capabilities. If neither display-name getter is available, the adapter
+falls back to the tier prefix alone and records that downgrade.

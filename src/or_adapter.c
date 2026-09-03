@@ -353,6 +353,7 @@ static bool write_given_name_marker(patch_handle_t instance,
     uint64_t ignored_return = 0u;
     const char *reason = "unknown";
     bool used_empty_fallback = false;
+    bool used_display_name = false;
     if (failure_reason) *failure_reason = NULL;
     if (!g_adapter.runtime || !instance ||
         !g_adapter.runtime->capabilities.given_name_property_ready ||
@@ -374,6 +375,17 @@ static bool write_given_name_marker(patch_handle_t instance,
         goto fail;
     }
     name = handle_valid(original) ? patchlib_string_cstr(original) : NULL;
+    if (!name || name[0] == '\0') {
+        free(name);
+        name = NULL;
+        if (g_adapter.runtime->method_display_name_get &&
+            patchlib_method_invoke_args(g_adapter.runtime->method_display_name_get,
+                                        instance, &original, NULL) &&
+            handle_valid(original)) {
+            name = patchlib_string_cstr(original);
+            used_display_name = name && name[0] != '\0';
+        }
+    }
     if (name && name[0] != '\0') {
         if (strstr(name, prefix) != NULL) {
             free(name);
@@ -432,7 +444,7 @@ static bool write_given_name_marker(patch_handle_t instance,
     }
     free(readback_name);
     if (failure_reason) *failure_reason = used_empty_fallback
-        ? reason : "ok";
+        ? reason : (used_display_name ? "display_name_property" : "ok");
     return true;
 
 fail:
@@ -999,6 +1011,12 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
            runtime->capabilities.given_name_property_ready ? "available" : "unavailable",
            runtime->method_given_name_get ? "available" : "unavailable",
            runtime->method_given_name_set ? "available" : "unavailable");
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[NAME_SOURCE] property=%s getter=%s",
+           runtime->property_display_name && patchlib_property_get_name &&
+                   patchlib_property_get_name(runtime->property_display_name)
+               ? patchlib_property_get_name(runtime->property_display_name)
+               : "unavailable",
+           runtime->method_display_name_get ? "available" : "unavailable");
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[NOTICE_API] NewText=%s params=%d colorType=%d",
            runtime->capabilities.new_text_ready ? "available" : "unavailable",

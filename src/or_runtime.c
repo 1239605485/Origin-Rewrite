@@ -201,6 +201,36 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
         }
     }
 
+    /* Hostile NPCs normally leave GivenName empty. Resolve a read-only
+     * localized display-name property as the source for the original name;
+     * each candidate is accepted only with the exact instance/object/zero-arg
+     * getter ABI. FullName is preferred, TypeName is an automatic fallback. */
+    if (patchlib_type_get_property && patchlib_property_get_get_method &&
+        patchlib_method_get_signature && tefstd_vector_size && tefstd_vector_at) {
+        static const char *const display_names[] = {"FullName", "TypeName"};
+        for (i = 0; i < sizeof(display_names) / sizeof(display_names[0]); ++i) {
+            property = patchlib_type_get_property(runtime->npc_type,
+                                                  display_names[i]);
+            getter = or_handle_is_valid(property)
+                ? patchlib_property_get_get_method(property) : PATCH_NULL;
+            memset(&getter_sig, 0, sizeof(getter_sig));
+            getter_ok = or_handle_is_valid(getter) &&
+                        patchlib_method_get_signature(getter, &getter_sig) &&
+                        getter_sig.is_instance && getter_sig.return_type == PATCH_OBJECT &&
+                        tefstd_vector_size(&getter_sig.arg_types) == 0u;
+            if (patchlib_method_signature_free && getter_sig.method) {
+                (void)patchlib_method_signature_free(&getter_sig);
+            }
+            if (getter_ok) {
+                runtime->property_display_name = property;
+                runtime->method_display_name_get = getter;
+                break;
+            }
+            or_release_handle(property);
+            or_release_handle(getter);
+        }
+    }
+
     if (!main_type || !patchlib_type_get_method_by_param_count ||
         !patchlib_method_get_signature) return;
     for (i = 0; i < sizeof(text_counts) / sizeof(text_counts[0]); ++i) {
@@ -502,6 +532,8 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->property_given_name);
     or_release_handle(runtime->method_given_name_get);
     or_release_handle(runtime->method_given_name_set);
+    or_release_handle(runtime->property_display_name);
+    or_release_handle(runtime->method_display_name_get);
     or_release_handle(runtime->main_game_mode);
     or_release_handle(runtime->main_zenith_world);
     or_release_handle(runtime->main_hard_mode);
