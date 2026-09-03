@@ -43,6 +43,8 @@ static void init_mod(kernel_mod_handle_t *handle) {
     config_ok = or_config_validate(&g_config);
     or_state_store_init(&g_state);
     or_runtime_init(&g_runtime);
+    OR_LOG(MOD_LOG_LEVEL_INFO, "startup_confirmation version=%s stage=configuring",
+           g_mod_info.version);
     OR_STARTUP_EMIT("startup_confirmation version=%s stage=configuring", g_mod_info.version);
     runtime_ok = or_runtime_probe(&g_runtime);
 
@@ -58,6 +60,13 @@ static void init_mod(kernel_mod_handle_t *handle) {
     }
     OR_LOG(MOD_LOG_LEVEL_INFO, "Origin Rewrite(起源重构) core loaded; runtime gameplay gate=%s",
            g_runtime.capabilities.gameplay_enabled ? "on" : "off");
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "startup_confirmation version=%s gameplay=%s setdefaults=%s ai=%s loot=%s",
+           g_mod_info.version,
+           g_runtime.capabilities.gameplay_enabled ? "on" : "off",
+           g_runtime.capabilities.exact_spawn_commit_resolved ? "on" : "off",
+           g_runtime.ai_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",
+           g_runtime.loot_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off");
     OR_STARTUP_EMIT("startup_confirmation version=%s gameplay=%s setdefaults=%s ai=%s loot=%s",
                     g_mod_info.version,
                     g_runtime.capabilities.gameplay_enabled ? "on" : "off",

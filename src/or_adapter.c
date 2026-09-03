@@ -622,6 +622,10 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
                                &is_friendly, &active, &failed_field)) {
             if (!g_adapter.first_setdefaults_logged) {
                 g_adapter.first_setdefaults_logged = true;
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "setdefaults_first_callback type=%u vanillaLife=%lld life=%lld",
+                       (unsigned)npc_type, (long long)vanilla.life_max,
+                       (long long)vanilla.life_current);
                 OR_DIAG_LOG("setdefaults_first_callback type=%u vanillaLife=%lld life=%lld",
                             (unsigned)npc_type, (long long)vanilla.life_max,
                             (long long)vanilla.life_current);
