@@ -1,4 +1,4 @@
-# Origin Rewrite v1.0.2-hook-debug（全新框架·Hook 入口诊断版）
+# Origin Rewrite v1.0.3-entry-probe（全新框架·真实入口探针版）
 
 这是从旧 OriginRewrite 实现之外重新搭的干净框架。当前只做“最薄完整核心链路”，
 不含技能 AI、掉落、世界规则、地形天气、多人同步。

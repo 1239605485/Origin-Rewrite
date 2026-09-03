@@ -137,7 +137,13 @@ static void fw_resolve_setdefaults(fw_runtime *runtime) {
             fw_release_handle(method);
             continue;
         }
-        if (signature.is_instance &&
+        /* Param-count lookup is only a prefilter.  Accept only the real
+         * instance void SetDefaults overload; otherwise a same-count method
+         * can receive a callback with the wrong semantic entry point. */
+        if (signature.is_instance && signature.return_type == PATCH_VOID &&
+            patchlib_method_get_name &&
+            patchlib_method_get_name(method) &&
+            strcmp(patchlib_method_get_name(method), "SetDefaults") == 0 &&
             runtime->method_setdefaults_count < FW_SETDEFAULTS_LIMIT) {
             runtime->method_setdefaults[
                 runtime->method_setdefaults_count++] = method;

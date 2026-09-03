@@ -85,6 +85,8 @@ static bool g_gameplay_ready = false;
 static uint32_t g_diag_count = 0u;
 static uint32_t g_setdefaults_hits = 0u;
 static uint32_t g_ai_hits = 0u;
+
+#define FW_HOOK_HIT_LOG_LIMIT 16u
 static uint64_t g_fallback_tick = 0u;
 static uint64_t g_next_generation = 1u;
 
@@ -598,8 +600,11 @@ static void fw_setdefaults_postfix(patch_handle_t instance, void **args,
     const char *failed_field = NULL;
 
     ++g_setdefaults_hits;
-    FW_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_HIT] SetDefaults count=%u instance=%p",
-           (unsigned)g_setdefaults_hits, (void *)instance);
+    if (g_setdefaults_hits <= FW_HOOK_HIT_LOG_LIMIT) {
+        FW_LOG(MOD_LOG_LEVEL_INFO,
+               "[HOOK_HIT] SetDefaults count=%u instance=%p",
+               (unsigned)g_setdefaults_hits, (void *)instance);
+    }
     (void)args;
     (void)result;
     (void)sig_info;
@@ -650,8 +655,10 @@ static void fw_ai_postfix(patch_handle_t instance, void **args,
     const char *failed_field = NULL;
 
     ++g_ai_hits;
-    FW_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_HIT] AI count=%u instance=%p",
-           (unsigned)g_ai_hits, (void *)instance);
+    if (g_ai_hits <= FW_HOOK_HIT_LOG_LIMIT) {
+        FW_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_HIT] AI count=%u instance=%p",
+               (unsigned)g_ai_hits, (void *)instance);
+    }
     (void)args;
     (void)result;
     (void)sig_info;
@@ -740,6 +747,17 @@ bool fw_core_init(void) {
             g_runtime.main_fields_resolved ? "ok" : "optional");
 
     for (i = 0; i < g_runtime.method_setdefaults_count; ++i) {
+        FW_LOG(MOD_LOG_LEVEL_INFO,
+               "[ENTRY_PROBE] SetDefaults candidate=%u name=%s params=%d",
+               (unsigned)i,
+               patchlib_method_get_name &&
+                       patchlib_method_get_name(g_runtime.method_setdefaults[i])
+                   ? patchlib_method_get_name(g_runtime.method_setdefaults[i])
+                   : "unknown",
+               patchlib_method_get_param_count
+                   ? patchlib_method_get_param_count(
+                         g_runtime.method_setdefaults[i])
+                   : -1);
         if (fw_install_postfix(g_runtime.method_setdefaults[i],
                                fw_setdefaults_postfix,
                                &g_runtime.setdefaults_hooks[
@@ -752,6 +770,16 @@ bool fw_core_init(void) {
     if (g_runtime.ai_known_dispatcher ||
         fw_signature_matches(g_runtime.method_ai, true, PATCH_VOID,
                              NULL, 0u)) {
+        FW_LOG(MOD_LOG_LEVEL_INFO,
+               "[ENTRY_PROBE] AI candidate name=%s params=%d dispatcher=%s",
+               patchlib_method_get_name && g_runtime.method_ai &&
+                       patchlib_method_get_name(g_runtime.method_ai)
+                   ? patchlib_method_get_name(g_runtime.method_ai)
+                   : "unknown",
+               patchlib_method_get_param_count && g_runtime.method_ai
+                   ? patchlib_method_get_param_count(g_runtime.method_ai)
+                   : -1,
+               g_runtime.ai_known_dispatcher ? "metadata-fallback" : "exact");
         if (!fw_install_postfix(g_runtime.method_ai, fw_ai_postfix,
                                 &g_runtime.ai_hook)) {
             FW_LOG(MOD_LOG_LEVEL_WARNING,
@@ -777,7 +805,7 @@ bool fw_core_init(void) {
             g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
             g_gameplay_ready ? "on" : "off");
     FW_LOG(MOD_LOG_LEVEL_INFO,
-           "[HOOK_STATE] version=1.0.2-hook-debug setdefaults=%u ai=%s "
+           "[HOOK_STATE] version=1.0.3-entry-probe setdefaults=%u ai=%s "
            "gameplay=%s; waiting_for_runtime_callbacks",
            (unsigned)g_runtime.setdefaults_hook_count,
            g_runtime.ai_hook != PATCH_HOOK_INVALID_ID ? "on" : "off",
