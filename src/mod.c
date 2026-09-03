@@ -21,9 +21,9 @@ static OR_Runtime g_runtime;
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026090434,
+    .version_code = 2026090435,
     .api_version = 1,
-    .version = "0.3.3-roll-diagnostic"
+    .version = "0.3.4-elite-notice"
 };
 
 static void init_mod(kernel_mod_handle_t *handle) {
@@ -31,7 +31,7 @@ static void init_mod(kernel_mod_handle_t *handle) {
     bool runtime_ok;
     or_log_init(handle);
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=0.3.3-roll-diagnostic versionCode=2026090434 stage=enter");
+           "[MODULE_BEACON] version=0.3.4-elite-notice versionCode=2026090435 stage=enter");
 
     OR_LOG(MOD_LOG_LEVEL_INFO, "[INIT_STAGE] config_begin");
     or_config_default(&g_config);
@@ -54,10 +54,10 @@ static void init_mod(kernel_mod_handle_t *handle) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "Verified mobile NPC hooks were not installable; gameplay overlay remains disabled");
     }
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=0.3.3-roll-diagnostic gameplay=%s",
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=0.3.4-elite-notice gameplay=%s",
            g_runtime.capabilities.gameplay_enabled ? "on" : "off");
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=0.3.3-roll-diagnostic versionCode=2026090434 stage=ready");
+           "[MODULE_BEACON] version=0.3.4-elite-notice versionCode=2026090435 stage=ready");
 }
 
 static void cleanup_mod(kernel_mod_handle_t *handle) {

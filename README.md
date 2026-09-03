@@ -2,7 +2,7 @@
 
 这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.3.3-roll-diagnostic`（versionCode `2026090434`）在 AI archetype 版上增加 `[ROLL]` 概率回读：每次真实激活提交都会记录模式基础概率、规则修正后的有效概率、是否通过和最终提交结果；同时把 AI 回调诊断限制为前 8 条，避免挤掉属性回读日志。重构体名称、属性和已确认的 AI 兼容分类保持不变，不调用新投射物、召唤或瞬移桥接；颜色、`Main.NewText`、NPCLoot 和额外掉落仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+当前 `0.3.4-elite-notice`（versionCode `2026090435`）在 AI archetype 版上保留 `[ROLL]` 概率回读：每次真实激活提交都会记录模式基础概率、规则修正后的有效概率、是否通过和最终提交结果；同时把 AI 回调诊断限制为前 8 条，避免挤掉属性回读日志。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
 
 玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
 

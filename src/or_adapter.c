@@ -777,7 +777,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     }
     /* The name setter is the first player-facing P0-C marker. It runs only
      * after the real active=true commit and is never retried on later AI ticks.
-     * Color, chat, loot, and special-AI bridges remain closed. */
+     * Color, loot, and special-AI bridges remain closed. */
     {
         const char *prefix = tier_prefix(spawn.tier);
         const char *name_reason = NULL;
@@ -792,8 +792,23 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                or_elite_tier_name(spawn.tier), prefix ? prefix : "unavailable",
                name_ok ? "GivenName" : "log-only");
     }
+    /* Main.NewText is opened only for the two highest currently-enabled
+     * tiers. The ABI was verified during runtime probing, and the call is
+     * made once, after the authoritative commit, never from SetDefaults or
+     * the recurring AI path. A failed notice must not invalidate the already
+     * committed elite or touch its gameplay state. */
+    {
+        bool notice_requested = spawn.tier >= OR_TIER_CALAMITY;
+        bool notice_ok = !notice_requested || show_elite_notice(spawn.tier, npc_type);
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[ELITE_NOTICE] type=%u tier=%s requested=%s noticeOk=%s",
+               (unsigned)npc_type, or_elite_tier_name(spawn.tier),
+               notice_requested ? "yes" : "no",
+               notice_requested ? (notice_ok ? "yes" : "no") : "skip");
+    }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] color/NewText/loot/special-AI skipped; name-only P0-C");
+           "[SAFE_MODE] color/loot/special-AI skipped; name marker active; "
+           "NewText notice only for calamity+");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: concept=重构体 prefix=%s type=%u tier=%s progress=%s mode=%s",
            tier_prefix(spawn.tier) ? tier_prefix(spawn.tier) : "unavailable",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
@@ -1085,7 +1100,8 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                "[P0_GATE] AI postfix unavailable; SetDefaults capture disabled");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] color/NewText/NPCLoot/extra-loot/special-AI disabled; name marker gated after commit");
+           "[SAFE_MODE] color/NPCLoot/extra-loot/special-AI disabled; "
+           "name marker active after commit; NewText gated to calamity+");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
     runtime->capabilities.exact_loot_hook_resolved = runtime->loot_hook_id != PATCH_HOOK_INVALID_ID;
