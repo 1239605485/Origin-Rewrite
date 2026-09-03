@@ -80,6 +80,8 @@ typedef enum OR_Weather {
     OR_WEATHER_COUNT
 } OR_Weather;
 
+const char *or_weather_name(OR_Weather weather);
+
 typedef enum OR_SpawnSource {
     OR_SPAWN_NORMAL = 0,
     OR_SPAWN_ELITE,

@@ -496,6 +496,56 @@ static OR_ProgressStage current_progress(void) {
     return OR_PROGRESS_PRE_HARDMODE;
 }
 
+static void capture_world_context(OR_TerrainSnapshot *terrain,
+                                  OR_Weather *weather,
+                                  bool *is_night) {
+    bool day_time = true;
+    bool blood_moon = false;
+    bool raining = false;
+    bool eclipse = false;
+    bool pumpkin_moon = false;
+    bool snow_moon = false;
+    bool slime_rain = false;
+    if (terrain) {
+        /* Tile/player-position probing is deliberately deferred. The only
+         * terrain values here are the v0.5 safe defaults. */
+        *terrain = (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST,
+                                        OR_SPECIAL_NONE};
+    }
+    if (!g_adapter.runtime) {
+        if (weather) *weather = OR_WEATHER_CLEAR;
+        if (is_night) *is_night = false;
+        return;
+    }
+    (void)read_bool(g_adapter.runtime->main_day_time, NULL, &day_time);
+    (void)read_bool(g_adapter.runtime->main_blood_moon, NULL, &blood_moon);
+    (void)read_bool(g_adapter.runtime->main_raining, NULL, &raining);
+    (void)read_bool(g_adapter.runtime->main_eclipse, NULL, &eclipse);
+    (void)read_bool(g_adapter.runtime->main_pumpkin_moon, NULL, &pumpkin_moon);
+    (void)read_bool(g_adapter.runtime->main_snow_moon, NULL, &snow_moon);
+    (void)read_bool(g_adapter.runtime->main_slime_rain, NULL, &slime_rain);
+    if (is_night) *is_night = !day_time;
+    if (!weather) return;
+    if (blood_moon) {
+        *weather = OR_WEATHER_BLOOD_MOON;
+    } else if (eclipse) {
+        *weather = OR_WEATHER_ECLIPSE;
+    } else if (raining) {
+        *weather = OR_WEATHER_RAIN;
+    } else {
+        *weather = OR_WEATHER_CLEAR;
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[WORLD_CONTEXT] dayTime=%s night=%s raining=%s bloodMoon=%s "
+           "eclipse=%s pumpkinMoon=%s snowMoon=%s slimeRain=%s weather=%s "
+           "terrain=surface/forest source=verified_main_fields",
+           day_time ? "yes" : "no", day_time ? "no" : "yes",
+           raining ? "yes" : "no", blood_moon ? "yes" : "no",
+           eclipse ? "yes" : "no", pumpkin_moon ? "yes" : "no",
+           snow_moon ? "yes" : "no", slime_rain ? "yes" : "no",
+           or_weather_name(*weather));
+}
+
 static int32_t clamp_i32(int64_t value) {
     if (value > INT32_MAX) return INT32_MAX;
     if (value < 0) return 0;
@@ -939,9 +989,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.source = OR_SPAWN_NORMAL;
     context.progress = progress;
     context.mode = mode;
-    context.terrain = (OR_TerrainSnapshot){OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE};
-    context.weather = OR_WEATHER_CLEAR;
-    context.is_night = false;
+    capture_world_context(&context.terrain, &context.weather, &context.is_night);
     native_archetype = or_ai_classify_native_style(vanilla->ai_style, &archetype_known);
     context.archetype = archetype_known ? native_archetype : OR_AI_ARCHETYPE_MELEE;
     context.max_active_elites = g_adapter.config->max_active_elites;

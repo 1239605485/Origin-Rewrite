@@ -475,6 +475,13 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     static const char *const game_mode_names[] = {"GameMode", "gameMode"};
     static const char *const hard_mode_names[] = {"hardMode", "HardMode"};
     static const char *const update_count_names[] = {"GameUpdateCount", "gameUpdateCount"};
+    static const char *const day_time_names[] = {"dayTime"};
+    static const char *const blood_moon_names[] = {"bloodMoon"};
+    static const char *const raining_names[] = {"raining"};
+    static const char *const eclipse_names[] = {"eclipse"};
+    static const char *const pumpkin_moon_names[] = {"pumpkinMoon"};
+    static const char *const snow_moon_names[] = {"snowMoon"};
+    static const char *const slime_rain_names[] = {"slimeRain"};
     patch_handle_t main_type;
     bool fields_ok;
     if (!runtime) return false;
@@ -537,6 +544,31 @@ bool or_runtime_probe(OR_Runtime *runtime) {
                                                               sizeof(update_count_names) / sizeof(update_count_names[0]),
                                                               false, PATCH_INT64, sizeof(int64_t));
         }
+        runtime->main_day_time = or_resolve_field_any(
+            main_type, day_time_names, sizeof(day_time_names) / sizeof(day_time_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->main_blood_moon = or_resolve_field_any(
+            main_type, blood_moon_names, sizeof(blood_moon_names) / sizeof(blood_moon_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->main_raining = or_resolve_field_any(
+            main_type, raining_names, sizeof(raining_names) / sizeof(raining_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->main_eclipse = or_resolve_field_any(
+            main_type, eclipse_names, sizeof(eclipse_names) / sizeof(eclipse_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->main_pumpkin_moon = or_resolve_field_any(
+            main_type, pumpkin_moon_names, sizeof(pumpkin_moon_names) / sizeof(pumpkin_moon_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->main_snow_moon = or_resolve_field_any(
+            main_type, snow_moon_names, sizeof(snow_moon_names) / sizeof(snow_moon_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->main_slime_rain = or_resolve_field_any(
+            main_type, slime_rain_names, sizeof(slime_rain_names) / sizeof(slime_rain_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
+        runtime->capabilities.world_context_ready = runtime->main_day_time != PATCH_NULL &&
+                                                     runtime->main_raining != PATCH_NULL &&
+                                                     runtime->main_blood_moon != PATCH_NULL &&
+                                                     runtime->main_eclipse != PATCH_NULL;
         or_release_handle(main_type);
     } else {
         or_release_handle(main_type);
@@ -606,6 +638,13 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->main_net_mode);
     or_release_handle(runtime->main_world_id);
     or_release_handle(runtime->main_update_count);
+    or_release_handle(runtime->main_day_time);
+    or_release_handle(runtime->main_blood_moon);
+    or_release_handle(runtime->main_raining);
+    or_release_handle(runtime->main_eclipse);
+    or_release_handle(runtime->main_pumpkin_moon);
+    or_release_handle(runtime->main_snow_moon);
+    or_release_handle(runtime->main_slime_rain);
     or_release_handle(runtime->npc_downed_mech);
     or_release_handle(runtime->npc_downed_plant);
     or_release_handle(runtime->npc_downed_golem);

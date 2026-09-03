@@ -23,6 +23,18 @@ typedef struct OR_RuleDefinition {
     bool requires_evil_biome;
 } OR_RuleDefinition;
 
+const char *or_weather_name(OR_Weather weather) {
+    switch (weather) {
+        case OR_WEATHER_RAIN: return "rain";
+        case OR_WEATHER_SANDSTORM: return "sandstorm";
+        case OR_WEATHER_BLIZZARD: return "blizzard";
+        case OR_WEATHER_ECLIPSE: return "eclipse";
+        case OR_WEATHER_BLOOD_MOON: return "blood_moon";
+        case OR_WEATHER_CLEAR: return "clear";
+        default: return "unknown";
+    }
+}
+
 static const OR_RuleDefinition g_rule_definitions[OR_RULE_COUNT] = {
     {"elite_tide", (1u << OR_RULE_STORM_BORDER), 1.00f, 1.00f, 1.00f, 0,
      1.25f, 0.10f, 1.00f, 1.00f, {1.00f, 1.00f, 1.00f, 1.00f}, OR_ELEMENT_NONE,

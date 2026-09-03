@@ -26,14 +26,14 @@ OriginRewrite-android-arm64.zip
 bash scripts/package_android_arm64.sh
 ```
 
-0.5.0-world-field-scan 安装后，先确认游戏能稳定启动，再刷出若干重构体，最后导出 TEFKernel 日志。重点查找
+0.5.1-world-context-read 安装后，先确认游戏能稳定启动，再刷出若干重构体，最后导出 TEFKernel 日志。重点查找
 `[OR_DIAG] stat_write`：`vanillaLife` 是原版最大生命，`finalLife` 是计算值，
 `readbackLifeMax` 和 `readbackLife` 是写入后的回读值。若 TEFManager 日志包中没有模组
 输出，可使用 Android logcat 过滤 `OriginRewrite` 标签。
 
 同时检查：
 
-- `[MODULE_BEACON] version=0.5.0-world-field-scan versionCode=2026090443`
+- `[MODULE_BEACON] version=0.5.1-world-context-read versionCode=2026090444`
 - `[INIT_STAGE] config_done`
 - `[INIT_STAGE] runtime_probe_done`
 - `[ENTRY_PROBE] SetDefaults candidate=0 params=2 abi=int32,pointer verified=yes`
@@ -55,6 +55,7 @@ bash scripts/package_android_arm64.sh
 - `[VISUAL_METHOD_ARG] name=... index=... type=...`
 - `[WORLD_MEMBER] kind=field name=... instance=... static=... size=... type=...`
 - `[WORLD_SCAN] logged=... limit=96`
+- `[WORLD_CONTEXT] dayTime=... night=... raining=... bloodMoon=... eclipse=... weather=... terrain=surface/forest source=verified_main_fields`
 
 本版本会额外写入 `originrewrite_runtime.log`。如果 TEFManager 导出包仍缺少模组日志，
 请从 Android logcat 过滤 `OriginRewrite`，或从 TEFKernel 日志目录提取该文件。

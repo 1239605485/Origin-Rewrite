@@ -21,6 +21,7 @@ typedef struct OR_RuntimeCapabilities {
     bool exact_death_hook_resolved;
     bool exact_loot_hook_resolved;
     bool ai_dispatcher_known_target;
+    bool world_context_ready;
     bool color_marker_ready;
     bool color_marker_probe_ready;
     bool given_name_property_ready;
@@ -60,6 +61,13 @@ typedef struct OR_Runtime {
     patch_handle_t main_net_mode;
     patch_handle_t main_world_id;
     patch_handle_t main_update_count;
+    patch_handle_t main_day_time;
+    patch_handle_t main_blood_moon;
+    patch_handle_t main_raining;
+    patch_handle_t main_eclipse;
+    patch_handle_t main_pumpkin_moon;
+    patch_handle_t main_snow_moon;
+    patch_handle_t main_slime_rain;
     patch_handle_t npc_downed_mech;
     patch_handle_t npc_downed_plant;
     patch_handle_t npc_downed_golem;
