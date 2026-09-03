@@ -1,1 +1,6 @@
-1
+build/
+build-cc/
+*.o
+*.so
+*.dll
+*.dylib
