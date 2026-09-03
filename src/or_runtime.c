@@ -176,6 +176,29 @@ static patch_handle_t or_resolve_field_any(patch_handle_t type,
     return PATCH_NULL;
 }
 
+static patch_handle_t or_probe_field(patch_handle_t type, const char *name) {
+    patch_handle_t field;
+    if (!type || !name || !patchlib_type_get_field) return PATCH_NULL;
+    field = patchlib_type_get_field(type, name);
+    if (!or_handle_is_valid(field) || !patchlib_field_get_name ||
+        !patchlib_field_get_size || !patchlib_field_get_type ||
+        !patchlib_field_is_static || !patchlib_field_is_instance) {
+        or_release_handle(field);
+        OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                       "[TERRAIN_MEMBER] name=%s status=unavailable", name);
+        return PATCH_NULL;
+    }
+    OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                   "[TERRAIN_MEMBER] kind=field name=%s instance=%s static=%s "
+                   "size=%zu type=%d read=deferred",
+                   patchlib_field_get_name(field),
+                   patchlib_field_is_instance(field) ? "yes" : "no",
+                   patchlib_field_is_static(field) ? "yes" : "no",
+                   patchlib_field_get_size(field),
+                   (int)patchlib_field_get_type(field));
+    return field;
+}
+
 static patch_handle_t or_resolve_marker_field(patch_handle_t type,
                                               const char *name) {
     patch_handle_t field;
@@ -513,6 +536,9 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     runtime->field_town_npc = or_resolve_field(runtime->npc_type, "townNPC", true, PATCH_BOOL, sizeof(bool));
     runtime->field_boss = or_resolve_field(runtime->npc_type, "boss", true, PATCH_BOOL, sizeof(bool));
     runtime->field_ai_style = or_resolve_field(runtime->npc_type, "aiStyle", true, PATCH_INT32, sizeof(int32_t));
+    /* Position is intentionally metadata-only in this version. Its native
+     * representation must be confirmed before any byte or pointer read. */
+    runtime->field_position_probe = or_probe_field(runtime->npc_type, "position");
 
     /* active and value are optional compatibility/reward fields. The core
      * elite stat overlay only needs the vanilla combat fields below. */
@@ -565,10 +591,27 @@ bool or_runtime_probe(OR_Runtime *runtime) {
         runtime->main_slime_rain = or_resolve_field_any(
             main_type, slime_rain_names, sizeof(slime_rain_names) / sizeof(slime_rain_names[0]),
             false, PATCH_BOOL, sizeof(bool));
+        runtime->main_world_surface = or_resolve_field(
+            main_type, "worldSurface", false, PATCH_DOUBLE, sizeof(double));
+        runtime->main_top_world = or_resolve_field(
+            main_type, "topWorld", false, PATCH_FLOAT, sizeof(float));
+        runtime->main_bottom_world = or_resolve_field(
+            main_type, "bottomWorld", false, PATCH_FLOAT, sizeof(float));
         runtime->capabilities.world_context_ready = runtime->main_day_time != PATCH_NULL &&
                                                      runtime->main_raining != PATCH_NULL &&
                                                      runtime->main_blood_moon != PATCH_NULL &&
                                                      runtime->main_eclipse != PATCH_NULL;
+        /* The metadata probe is intentionally not promoted to a usable
+         * terrain capability. NPC.position still needs an ABI-safe value
+         * representation before depth can be classified. */
+        runtime->capabilities.terrain_probe_ready = false;
+        OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                       "[TERRAIN_CAPABILITY] metadata=%s terrainRead=no "
+                       "reason=position_representation_deferred",
+                       runtime->field_position_probe != PATCH_NULL &&
+                       runtime->main_world_surface != PATCH_NULL &&
+                       runtime->main_top_world != PATCH_NULL &&
+                       runtime->main_bottom_world != PATCH_NULL ? "ready" : "partial");
         or_release_handle(main_type);
     } else {
         or_release_handle(main_type);
@@ -625,6 +668,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->field_town_npc);
     or_release_handle(runtime->field_boss);
     or_release_handle(runtime->field_ai_style);
+    or_release_handle(runtime->field_position_probe);
     or_release_handle(runtime->field_color);
     or_release_handle(runtime->color_type);
     or_release_handle(runtime->property_given_name);
@@ -645,6 +689,9 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->main_pumpkin_moon);
     or_release_handle(runtime->main_snow_moon);
     or_release_handle(runtime->main_slime_rain);
+    or_release_handle(runtime->main_world_surface);
+    or_release_handle(runtime->main_top_world);
+    or_release_handle(runtime->main_bottom_world);
     or_release_handle(runtime->npc_downed_mech);
     or_release_handle(runtime->npc_downed_plant);
     or_release_handle(runtime->npc_downed_golem);

@@ -2,7 +2,7 @@
 
 这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.5.1-world-context-read`（versionCode `2026090444`）在上一版基础上继续只读解析 `NPC.color` 和视觉方法签名，并读取已在真机字段扫描中确认的 `Main.dayTime`、`bloodMoon`、`raining`、`eclipse`、`pumpkinMoon`、`snowMoon`、`slimeRain` 静态字段，生成提交时记录昼夜和基础天气快照；不读取未知字段、不调用未知方法、不写入世界对象。地形仍使用安全默认值 `surface/forest`，不能视为真实地形已接入。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+当前 `0.5.2-terrain-probe`（versionCode `2026090445`）在上一版基础上继续只读解析 `NPC.color` 和视觉方法签名，读取已在真机字段扫描中确认的 `Main.dayTime`、`bloodMoon`、`raining`、`eclipse`、`pumpkinMoon`、`snowMoon`、`slimeRain`、`worldSurface`、`topWorld`、`bottomWorld`，并在生成提交点记录世界几何快照。同时只记录 `NPC.position` 的真实 PatchLib 类型和大小，暂不读取其值；位置表示未确认前，地形继续安全回退为 `surface/forest`，不能视为真实地形已接入。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
 
 玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
 

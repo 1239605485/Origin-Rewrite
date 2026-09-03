@@ -304,6 +304,12 @@ static bool read_float(patch_handle_t field, patch_handle_t instance, float *out
     return field_read(field, instance, out);
 }
 
+static bool read_double(patch_handle_t field, patch_handle_t instance, double *out) {
+    if (!out || !handle_valid(field) || !patchlib_field_get_type ||
+        patchlib_field_get_type(field) != PATCH_DOUBLE) return false;
+    return field_read(field, instance, out);
+}
+
 static bool read_u64(patch_handle_t field, patch_handle_t instance, uint64_t *out) {
     patch_type_t type;
     int64_t signed_value;
@@ -496,7 +502,8 @@ static OR_ProgressStage current_progress(void) {
     return OR_PROGRESS_PRE_HARDMODE;
 }
 
-static void capture_world_context(OR_TerrainSnapshot *terrain,
+static void capture_world_context(patch_handle_t instance,
+                                  OR_TerrainSnapshot *terrain,
                                   OR_Weather *weather,
                                   bool *is_night) {
     bool day_time = true;
@@ -506,6 +513,12 @@ static void capture_world_context(OR_TerrainSnapshot *terrain,
     bool pumpkin_moon = false;
     bool snow_moon = false;
     bool slime_rain = false;
+    double world_surface = 0.0;
+    float top_world = 0.0f;
+    float bottom_world = 0.0f;
+    bool world_surface_ok = false;
+    bool top_world_ok = false;
+    bool bottom_world_ok = false;
     if (terrain) {
         /* Tile/player-position probing is deliberately deferred. The only
          * terrain values here are the v0.5 safe defaults. */
@@ -524,6 +537,11 @@ static void capture_world_context(OR_TerrainSnapshot *terrain,
     (void)read_bool(g_adapter.runtime->main_pumpkin_moon, NULL, &pumpkin_moon);
     (void)read_bool(g_adapter.runtime->main_snow_moon, NULL, &snow_moon);
     (void)read_bool(g_adapter.runtime->main_slime_rain, NULL, &slime_rain);
+    world_surface_ok = read_double(g_adapter.runtime->main_world_surface, NULL,
+                                   &world_surface);
+    top_world_ok = read_float(g_adapter.runtime->main_top_world, NULL, &top_world);
+    bottom_world_ok = read_float(g_adapter.runtime->main_bottom_world, NULL,
+                                 &bottom_world);
     if (is_night) *is_night = !day_time;
     if (!weather) return;
     if (blood_moon) {
@@ -544,6 +562,14 @@ static void capture_world_context(OR_TerrainSnapshot *terrain,
            eclipse ? "yes" : "no", pumpkin_moon ? "yes" : "no",
            snow_moon ? "yes" : "no", slime_rain ? "yes" : "no",
            or_weather_name(*weather));
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[TERRAIN_CONTEXT] depth=surface biome=forest special=none "
+           "source=safe_default position=deferred positionField=%s "
+           "worldSurface=%s:%.2f topWorld=%s:%.2f bottomWorld=%s:%.2f",
+           (g_adapter.runtime->field_position_probe && instance) ? "present" : "unavailable",
+           world_surface_ok ? "ok" : "unread", world_surface,
+           top_world_ok ? "ok" : "unread", top_world,
+           bottom_world_ok ? "ok" : "unread", bottom_world);
 }
 
 static int32_t clamp_i32(int64_t value) {
@@ -989,7 +1015,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.source = OR_SPAWN_NORMAL;
     context.progress = progress;
     context.mode = mode;
-    capture_world_context(&context.terrain, &context.weather, &context.is_night);
+    capture_world_context(instance, &context.terrain, &context.weather, &context.is_night);
     native_archetype = or_ai_classify_native_style(vanilla->ai_style, &archetype_known);
     context.archetype = archetype_known ? native_archetype : OR_AI_ARCHETYPE_MELEE;
     context.max_active_elites = g_adapter.config->max_active_elites;

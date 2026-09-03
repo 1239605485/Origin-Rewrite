@@ -22,6 +22,7 @@ typedef struct OR_RuntimeCapabilities {
     bool exact_loot_hook_resolved;
     bool ai_dispatcher_known_target;
     bool world_context_ready;
+    bool terrain_probe_ready;
     bool color_marker_ready;
     bool color_marker_probe_ready;
     bool given_name_property_ready;
@@ -47,6 +48,7 @@ typedef struct OR_Runtime {
     patch_handle_t field_town_npc;
     patch_handle_t field_boss;
     patch_handle_t field_ai_style;
+    patch_handle_t field_position_probe;
     patch_handle_t field_color;
     patch_handle_t color_type;
     patch_handle_t property_given_name;
@@ -68,6 +70,9 @@ typedef struct OR_Runtime {
     patch_handle_t main_pumpkin_moon;
     patch_handle_t main_snow_moon;
     patch_handle_t main_slime_rain;
+    patch_handle_t main_world_surface;
+    patch_handle_t main_top_world;
+    patch_handle_t main_bottom_world;
     patch_handle_t npc_downed_mech;
     patch_handle_t npc_downed_plant;
     patch_handle_t npc_downed_golem;
