@@ -126,9 +126,14 @@ static patch_handle_t or_resolve_marker_field(patch_handle_t type,
         or_release_handle(field);
         return PATCH_NULL;
     }
+    /* Terraria 1.4.5.6.4 reports NPC.color as an 8-byte PATCH_POINTER. The
+     * pointed storage is not a proven writable inline Color value; writing
+     * four bytes there can corrupt the native object and crash IL2CPP later.
+     * Keep this capability disabled until the actual Color representation is
+     * proven. */
     if (!patchlib_field_is_instance(field) || patchlib_field_is_static(field) ||
         patchlib_field_get_type(field) != PATCH_POINTER ||
-        patchlib_field_get_size(field) != 8u) {
+        patchlib_field_get_size(field) != 4u) {
         or_release_handle(field);
         return PATCH_NULL;
     }

@@ -21,9 +21,9 @@ static OR_Runtime g_runtime;
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026090424,
+    .version_code = 2026090425,
     .api_version = 1,
-    .version = "0.2.3-stability"
+    .version = "0.2.4-crash-isolation"
 };
 
 static void init_mod(kernel_mod_handle_t *handle) {
@@ -31,7 +31,7 @@ static void init_mod(kernel_mod_handle_t *handle) {
     bool runtime_ok;
     or_log_init(handle);
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=0.2.3-stability versionCode=2026090424 stage=enter");
+           "[MODULE_BEACON] version=0.2.4-crash-isolation versionCode=2026090425 stage=enter");
 
     OR_LOG(MOD_LOG_LEVEL_INFO, "[INIT_STAGE] config_begin");
     or_config_default(&g_config);
@@ -54,10 +54,10 @@ static void init_mod(kernel_mod_handle_t *handle) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "Verified mobile NPC hooks were not installable; gameplay overlay remains disabled");
     }
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=0.2.3-stability gameplay=%s",
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=0.2.4-crash-isolation gameplay=%s",
            g_runtime.capabilities.gameplay_enabled ? "on" : "off");
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=0.2.3-stability versionCode=2026090424 stage=ready");
+           "[MODULE_BEACON] version=0.2.4-crash-isolation versionCode=2026090425 stage=ready");
 }
 
 static void cleanup_mod(kernel_mod_handle_t *handle) {

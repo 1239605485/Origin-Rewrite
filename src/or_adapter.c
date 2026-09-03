@@ -454,8 +454,9 @@ static bool show_elite_notice(OR_EliteTier tier, uint32_t npc_type) {
     return true;
 }
 
-static void apply_visual_markers(patch_handle_t instance, OR_EliteTier tier,
-                                 uint32_t npc_type, bool announce) {
+static void __attribute__((unused)) apply_visual_markers(
+    patch_handle_t instance, OR_EliteTier tier, uint32_t npc_type,
+    bool announce) {
     uint32_t color_readback = 0u;
     bool color_ok = apply_color_marker(instance, tier, &color_readback);
     bool name_ok = write_given_name_marker(instance, tier);
@@ -720,9 +721,12 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                    (unsigned)npc_type);
         }
     }
-    if (native_active) {
-        apply_visual_markers(instance, spawn.tier, npc_type, true);
-    }
+    /* Crash-isolation gate: the live trace showed the first post-commit
+     * visual call was followed by SIGABRT. Keep the verified stat overlay,
+     * but do not invoke raw color storage, GivenName setter, or Main.NewText
+     * until each ABI is independently proven on this architecture. */
+    OR_LOG(MOD_LOG_LEVEL_WARNING,
+           "[VISUAL_SAFE_MODE] color/name/NewText skipped after crash isolation");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: type=%u tier=%s progress=%s mode=%s",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
            or_progress_stage_name(progress), or_game_mode_name(mode));
