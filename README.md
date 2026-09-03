@@ -2,7 +2,7 @@
 
 这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
 
-当前 `0.3.5-lifecycle-test`（versionCode `2026090436`）在上一版基础上增加长时间刷怪诊断：每约 30 秒输出一次 `[LIFECYCLE_HEALTH]`，汇总绑定表占用、pending/elite 数量、SetDefaults/AI/提交次数、回收/满表次数和状态清理次数；另输出过期 pending 清理计数。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+当前 `0.3.6-pending-cleanup`（versionCode `2026090437`）在上一版基础上增加过期 pending 自动清理：每约 30 秒输出一次 `[LIFECYCLE_HEALTH]`，并输出 `[LIFECYCLE_CLEANUP]` 清理计数，汇总绑定表占用、pending/elite 数量、SetDefaults/AI/提交次数、回收/满表次数和状态清理次数。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
 
 玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
 
