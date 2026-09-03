@@ -3,7 +3,10 @@
 #include "mod_core.h"
 #include "mod_logger.h"
 
-void (MOD_CALL_CONV *mod_logger_write)(
+/* mod_logger.h intentionally undefines its calling-convention helper after
+ * publishing the declaration; keep the module-owned nullable hook definition
+ * in the portable C spelling. */
+void (*mod_logger_write)(
     mod_log_level_t level, const char *tag, const char *fmt, ...) = NULL;
 
 static kernel_mod_info_t g_mod_info = {
