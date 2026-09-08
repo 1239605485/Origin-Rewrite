@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "targetGameVersion": "1.4.5.8.5",
+  "minimumGameVersion": "1.4.4.0",
+  "platform": "android-arm64-v8a",
+  "minimumAndroidApi": 24,
+  "bnm": {
+    "version": "2.5.2",
+    "sourceCommit": "502928771983d29e37f28c78f28823dfb775a3aa",
+    "compiledUnityFamilies": ["2022.2", "2022.3"],
+    "unsupportedUnityPolicy": "safe-off-and-use-PatchLib-fallback"
+  },
+  "hooks": "TEFKernel-PatchLib",
+  "metadata": "BNM-primary-with-PatchLib-fallback"
+}

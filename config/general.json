@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 5,
+  "enableElites": true,
+  "enableGameplayHooks": true,
+  "maxActiveRewrites": 8,
+  "sameNpcCooldownTicks": 60,
+  "journeyProbabilityMultiplier": 1.0,
+  "allowPreHardmodeApocalypse": false,
+  "classicChance": 0.20,
+  "expertChance": 0.30,
+  "masterChance": 0.40,
+  "zenithChance": 0.50,
+  "journeyChance": 0.20,
+  "authority": "host-or-singleplayer",
+  "runtimeAppliedKeys": [
+    "enableElites",
+    "enableGameplayHooks",
+    "maxActiveRewrites",
+    "sameNpcCooldownTicks",
+    "journeyProbabilityMultiplier",
+    "allowPreHardmodeApocalypse",
+    "classicChance",
+    "expertChance",
+    "masterChance",
+    "zenithChance",
+    "journeyChance"
+  ]
+}

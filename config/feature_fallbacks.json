@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "bnmUnavailable": "use-verified-PatchLib-field-access",
+  "spawnLifecycleUnavailable": "disable-rewrite-rolls",
+  "worldContextUnavailable": "use-conservative-pre-hardmode-and-forest-snapshot",
+  "specialAiUnavailable": "retain-vanilla-ai-and-stat-overlay",
+  "lootApiUnavailable": "preserve-vanilla-loot-and-final-NPC.value-only",
+  "broadcastUnavailable": "log-only",
+  "colorUnavailable": "name-prefix-only",
+  "networkUnavailable": "host-authoritative-decisions-no-client-side-roll"
+}

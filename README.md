@@ -1,100 +1,78 @@
-# Origin Rewrite｜起源重构
+# Origin Rewrite｜起源重构 BNM 架构版
 
-这是基于 v0.5 设计文档的 C11 实现。项目采用“原版 NPC + 运行时重构体状态”的方式，保留原版 AI/掉落作为底层链路，并在手机版 TEFKernel/KernelLoader 上接入经过目标版本验证的原生 Hook。
+`0.9.7-tefmanager-feature-enums` 是基于整合优化设计文档 v0.6 与
+`OriginRewrite-v0.6.84-source` 重建的 Android ARM64 KernelLoader 模组。
+工程使用官方 BNM 2.5.2 做 IL2CPP 元数据定位，以 TEFKernel PatchLib 作为唯一
+Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决策保留在可测试的纯 C 核心。
 
-当前 `0.5.2-terrain-probe`（versionCode `2026090445`）在上一版基础上继续只读解析 `NPC.color` 和视觉方法签名，读取已在真机字段扫描中确认的 `Main.dayTime`、`bloodMoon`、`raining`、`eclipse`、`pumpkinMoon`、`snowMoon`、`slimeRain`、`worldSurface`、`topWorld`、`bottomWorld`，并在生成提交点记录世界几何快照。同时只记录 `NPC.position` 的真实 PatchLib 类型和大小，暂不读取其值；位置表示未确认前，地形继续安全回退为 `surface/forest`，不能视为真实地形已接入。重构体名称、属性和已确认的 AI 兼容分类保持不变；仅对“灾变体/终焉体”在真实提交成功后调用已通过 ABI 探测的 `Main.NewText` 做一次系统播报，异化体不播报。颜色、NPCLoot、额外掉落和特殊 AI 仍关闭。此版本继续写入独立的 `originrewrite_runtime.log`：同时写入模组私有目录和 TEFKernel 导出目录，并通过 `OriginRewrite` logcat 标签输出启动阶段。
+## 架构
 
-玩家-facing 重构体名称格式为 `<层级前缀>·<原版名称>`：`异化体·僵尸`、`灾变体·骷髅`、`终焉体·恶魔眼`。内部 enum、状态和存档键继续使用 `elite`、`altered`、`calamity`、`apocalypse`，不改变内核兼容性。
+| 层 | 职责 | 失败策略 |
+|---|---|---|
+| `src/core` | 概率、进度、三档层级、属性、规则、AI 状态机、奖励策略、实例生命周期 | 不依赖游戏运行时，可独立测试 |
+| `src/platform/bnm` | 按名称解析 `Terraria.NPC/Main/Item`、字段和方法；作为 NPC 属性首选读写后端 | Unity/符号/元数据任一不匹配即 SAFE-OFF |
+| `src/platform/tef` | PatchLib ABI 探测、Prefix/Postfix Hook、公告、日志、配置读取 | 每项能力独立降级 |
+| `src/entry` | KernelLoader `create_kernel_mod()` 入口与组合根 | 不满足 P0 门槛时不启用生成改写 |
 
-诊断记录包含 `vanillaLife`、`finalLife`、`writeOk`、`readbackLifeMax` 和 `readbackLife`。其中 `readbackLifeMax` 与 `finalLife` 相同，才表示最大生命确实写入成功；如果日志包没有包含模组输出，可从 Android logcat 过滤 `OriginRewrite` 标签。
+BNM 编译目标为 Unity `2021.3`。启动时先通过 PatchLib 读取
+`UnityEngine.Application.unityVersion`，再用 xDL 检查 BNM 所需 IL2CPP 符号；只有
+两道门槛都通过，才从 TEFKernel 已完成初始化的 IL2CPP 线程调用
+`BNM::Loading::TrySetupByUsersFinder()`。BNM 不安装第二套原生 Hook。
 
-本项目区分“源码包”和“手机安装包”：源码包可以包含 CMake、源码和测试；手机安装包必须把 `Manifest.json` 放在 ZIP 根目录，并把已经编译的动态库放在 `Resources/lib/` 下。不能把源码工程目录直接改名后交给 TEFManager。
+## 已实现的核心行为
 
-## 当前状态
+- `SetDefaults` 只记录 `PendingInit`，不抽取、不修改属性、不占用活动名额。
+- 首个可验证的 `NPC.AI()` Postfix 且 `active=true` 才执行一次 `SpawnCommitted`。
+- 实例键为 `worldSessionId + npcSlot + generationId`，防止槽位复用污染状态。
+- 读取原版最终基准后一次性计算生命、伤害、防御、体型、击退、金币和 `npcSlots`。
+- 正式基础概率：普通 20%、专家 30%、大师 40%、天顶 50%、旅途沿用普通；活动上限 8。
+- 三档显示前缀：`异化体·`、`灾变体·`、`终焉体·`。
+- 世界/地形/天气规则在生成提交点冻结为快照；进度无法确认时回退到较早阶段。
+- AI 使用 `Ready → Telegraph → Active → Recovery → Cooldown` 状态机与硬上限。
+- 奖励策略保留原版掉落、最多一个额外槽，并用一次性标志防重复结算。
+- 只有主机或单机端能抽取与结算；客户端不会自行生成重构体或奖励。
+- `Resources/config/general.json` 的开关、概率、活动上限和冷却会从 KernelLoader
+  私有目录读取，非法值由统一验证器限幅。
 
-- `or_config.c`：v0.5 的进度、模式、三档重构层级、同屏上限和安全上限默认值。
-- `or_rules.c`：世界规则快照、地形/天气一次采样、规则冲突和统一限幅。
-- `or_spawn.c`：主机/单机权限、来源排除、重构体概率、模式权重、一次性生成提交。
-- `or_stats.c`：从原版最终基准值计算生命、伤害、防御、体型、击退、刷怪占用和金币。
-- `or_ai.c`：三档 AI 预算与五阶段状态机；前期终焉关闭，困难模式前期不开放召唤模板。
-- `or_state.c`：`PendingInit → SpawnCommitted → Live → DeathStarted → LootCommitted → Cleanup` 生命周期和 `generationId`。
-- `or_loot.c`：原版掉落保留、单额外奖励槽、阶段奖励分支、金币唯一后端边界。
-- `or_item_registry.c`：只允许显式、已确认的原版物品白名单，拒绝 Boss 袋、Boss 召唤物、未来内容和关键进度物品。
-- `or_runtime.c`：TEFKernel PatchLib 的字段精确检查、`SetDefaults` 方法签名精确检查、移动端目标入口探测，以及名称/颜色/公告能力探测。
-- `or_adapter.c`：只安装精确校验的 `NPC.SetDefaults(int,pointer)` 观察 Hook 和 `NPC.AI()` Postfix；SetDefaults 只保存 pending，AI 首次确认 active 后才提交；提交后记录 `[ROLL]` 概率结果、保存真实 `aiStyle` 快照，并按已确认样式选择兼容 archetype，未知样式回退为 melee；名称仅尝试一次，颜色、公告、NPCLoot、额外掉落和未经确认的特殊 AI 仍关闭。
-- `or_world.c`：世界规则的版本、配置哈希、规则种子和世界种子指纹校验。
+未经目标手机完整 ABI/顺序验证的特殊 AI 原生动作、颜色写入、额外物品生成、世界
+存档写入与客户端同步不会伪装成已完成；它们保留了核心策略、状态和能力探测，并按
+[`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) 中的状态安全关闭。
 
-当前 P0 版本只有在目标运行时实测的 `SetDefaults(int,pointer)` 与无参数 `AI()` 均通过精确 ABI 校验并成功安装时才启用生成观察链路；任一入口不可用则关闭重构体升级，不猜测其他重载。
+## 构建与测试
 
-## 固定的不变量
-
-1. `SetDefaults` 只记录 pending 和原版基准，不抽取层级、不提交状态、不修改属性、不消耗活动名额。
-2. 只有首次确认 `active=true` 的 AI Postfix 才能执行一次 `SpawnCommitted`；同一对象和 generation 不能重复 roll、重复提交或重复应用属性。AI Hook 未安装或未进入日志时，重构体升级保持关闭。
-3. 原版难度和种子修正完成后，读取一次最终基准；所有字段从快照重新计算，不能每帧重复乘算。
-4. 传奇（天顶世界）使用独立配置，不再额外叠加大师配置；旅行模式使用普通属性和普通等级权重，再应用独立概率倍率。
-5. 进度 × 重构层级属性表是唯一的阶段属性来源；全局等级配置只保存防御、体型、金币、击退和刷怪占用等通用值。
-6. 世界规则、地形、天气和事件只在生成提交点写入 `OR_RuleSnapshot`，已生成重构体不会因被拖动或天气变化而再次强化。
-7. 终焉体只选一个互斥模板；相位最多 3～5 发窄扇形攻击，召唤最多 2 只，狂怒只在首次跨过 25% 生命阈值触发。
-8. 掉落先验证主机/单机权限，再原子设置 `lootCommitted`；客户端不生成额外物品或金币。
-9. 金币只允许修改已确认的原版 `NPC.value` 后端；没有确认后端时保留原版金币并关闭额外金币，不手动造第二份钱。
-10. 宝匣和装备/饰品不写死物品 ID。只有 `OR_ItemRegistry` 收到目标版本已确认的原版白名单后才能实际解析奖励；解析失败必须回退阶段材料。
-
-## 模块关系
-
-```mermaid
-flowchart TD
-    A[原版生成提交] --> B[资格与权限检查]
-    B --> C[模式/进度/规则快照]
-    C --> D[一次抽取重构层级]
-    D --> E[一次计算属性与AI计划]
-    E --> F[状态表提交并应用]
-    F --> G[死亡入口]
-    G --> H[主机一次性掉落策略]
-    H --> I[原版物品白名单解析]
-```
-
-## 构建和测试
-
-在安装了 CMake 的环境中：
+宿主测试：
 
 ```bash
-cmake -S . -B build -DORIGINREWRITE_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+cmake -S . -B build-host -G Ninja -DORIGINREWRITE_BUILD_TESTS=ON
+cmake --build build-host
+ctest --test-dir build-host --output-on-failure
 ```
 
-TEFKernel API 路径可以通过 `-DORIGINREWRITE_MOD_API_DIR=/path/to/mod-api` 指定。Android ARM64 构建必须使用 `arm64-v8a`，输出名遵循手机版 TEFKernel 模板：
+Android ARM64 安装包：
 
-```text
-libOriginRewrite.android.arm64.so
+```bash
+export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
+bash scripts/package_android_arm64.sh
 ```
 
-安装包的根目录必须是：
+产物 `OriginRewrite-v0.9.7-tefmanager-feature-enums-android-arm64.zip` 可直接导入
+TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
+[`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 
-```text
-OriginRewrite-android-arm64.zip
-├─ Manifest.json
-├─ Info.json
-├─ OriginRewrite.json
-└─ Resources/
-   └─ lib/
-      └─ libOriginRewrite.android.arm64.so
-```
+## 日志验收
 
-在带 Android SDK/NDK 的环境中，运行 `scripts/package_android_arm64.sh` 会先构建 ARM64 动态库，再生成上述可导入 TEFManager 的 ZIP。`.github/workflows/android-arm64.yml` 提供相同的 GitHub Actions 流程。
+优先检查 KernelLoader 私有目录中的 `originrewrite_runtime.log`，或用 logcat 过滤
+`OriginRewrite`：
 
-本工作区未安装 CMake，已用系统 C11 编译器完成纯核心测试和共享库链接检查；vendor API 头文件本身产生的 ISO C pedantic 警告不属于 Origin Rewrite 源码错误。
+- `[UNITY_PROBE]`：读取到的 Unity 版本；
+- `[BNM_GATE]` / `[BNM_METADATA]`：BNM 是否通过门槛及字段/方法解析结果；
+- `[ENTRY_PROBE]`：`SetDefaults`/`AI` 的精确 ABI；
+- `[ROLL]`：基础概率、规则后概率、抽取与提交结果；
+- `[OR_DIAG] stat_write`：计算值和写回读值；
+- `[NAME_WRITE]`：名称前缀写入与回读结果；
+- `[LIFECYCLE_HEALTH]`：pending、活动实例、提交和清理计数。
 
-## 当前接入结果与下一阶段
+## 许可证
 
-已完成：真实 NPC `SetDefaults` Hook 的 pending 记录、目标运行时实测的 `SetDefaults(int,pointer)` ABI 门槛、AI Postfix 激活门槛、独立运行日志和槽位复用清理。当前版本不安装 NPCLoot Hook，也不执行颜色或公告调用；只有真实 active AI 回调才会进行一次属性提交，并尝试一次重构体名称前缀写入。`[NAME_SOURCE]` 会报告原版显示名 getter，`[NAME_WRITE] reason=` 会区分显示名来源、空值回退、setter 失败和回读失败。
-
-下一步：
-
-1. 对 `Item.NewItem` 完成目标版本精确签名校验和原版物品/装备/饰品/宝匣白名单；在验证完成前不启用额外掉落。
-2. 对死亡入口做前后顺序验证；在顺序不确定时继续只保留原版掉落。
-3. 用手机日志确认 `[ROLL]` 的 `baseChance/effectiveChance/passed` 与实际前缀数量一致。
-4. 继续确认更多 NPC 的 `[AI_TYPE]`，未知样式保持回退；archetype 稳定后接入真实玩家位置、地形、天气快照。
-5. 在手机端测试普通、稀有、传奇三档体型、金币、属性和多人客户端不重复结算。
-
-`Resources/config/README.md` 说明了为什么资源 JSON 在原生资源接口确认前不会被伪装成“已加载”。
+本工程以 AGPL-3.0-or-later 发布。BNM 2.5.2、xDL 与 KernelLoader mod API 是
+MIT 许可组件，详见 `LICENSE`、`THIRD_PARTY_NOTICES.md` 及各 vendored 文件头。
