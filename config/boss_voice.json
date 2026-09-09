@@ -1,6 +1,0 @@
-{
-  "schemaVersion": 1,
-  "enabled": false,
-  "reason": "bosses-are-excluded-by-default-and-target-dialog-api-is-not-verified",
-  "cooldownTicks": 600
-}

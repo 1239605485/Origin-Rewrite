@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "selection": "one-compatible-behavior-budget",
-  "altered": ["swift", "tenacious", "berserk", "leech"],
-  "calamity": ["charge", "shield", "longshot", "frost-or-heat"],
-  "apocalypse": ["summon", "phase", "hell-barrage", "doomsday-rage"],
-  "nativeExecution": "capability-gated-safe-off"
-}
