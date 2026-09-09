@@ -1,9 +1,0 @@
-{
-  "tier.altered": "Altered",
-  "tier.calamity": "Calamity",
-  "tier.apocalypse": "Apocalypse",
-  "notice.world": "[Elite Rules] Active world rules:",
-  "notice.terrain": "[Terrain Rule] Current area: {terrain}",
-  "notice.weather": "[Weather Rule] Current weather: {weather}",
-  "warning.safeOff": "An incompatible interface was detected; its feature was safely disabled"
-}
