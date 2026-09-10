@@ -2393,34 +2393,64 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
 }
 
 static void apply_special_ai(patch_handle_t instance, const OR_EliteRecord *record,
-                             uint32_t npc_type, uint32_t ai_tick) {
+                             uint32_t npc_type, uint32_t ai_tick,
+                             const OR_AiRuntimeState *ai_runtime) {
     float velocity[2];
     float speed;
     float direction;
+    float intensity;
+    float movement_multiplier;
+    OR_AiTemplate template;
+    bool rage_active;
     if (!ORIGINREWRITE_ENABLE_SPECIAL_AI || !instance || !record ||
         !g_adapter.runtime || !g_adapter.runtime->field_velocity_probe ||
+        !ai_runtime || ai_runtime->phase != OR_AI_PHASE_ACTIVE ||
         (ai_tick % 6u) != 0u) return;
+    /* Only Active may affect movement. Telegraph, recovery and cooldown
+     * remain vanilla so the player gets a readable wind-up. */
+    template = record->ai_plan.has_finisher
+        ? record->ai_plan.finisher : record->ai_plan.primary;
+    rage_active = template == OR_AI_TEMPLATE_RAGE && ai_runtime->rage_triggered;
+    if (template == OR_AI_TEMPLATE_RAGE && !rage_active) return;
     if (!read_vector2_field(g_adapter.runtime->field_velocity_probe, instance,
                            velocity)) return;
     direction = velocity[0] < -0.05f ? -1.0f : 1.0f;
     speed = record->tier == OR_TIER_APOCALYPSE ? 8.0f :
             (record->tier == OR_TIER_CALAMITY ? 6.0f : 4.5f);
-    switch (record->ai_plan.primary) {
+    intensity = isfinite(record->ai_plan.intensity) && record->ai_plan.intensity > 0.0f
+        ? record->ai_plan.intensity : 1.0f;
+    movement_multiplier = isfinite(record->rules.movement_multiplier) &&
+                          record->rules.movement_multiplier > 0.0f
+        ? record->rules.movement_multiplier : 1.0f;
+    speed *= intensity * movement_multiplier;
+    if (rage_active) speed *= 1.25f;
+    switch (template) {
         case OR_AI_TEMPLATE_LUNGE:
         case OR_AI_TEMPLATE_DASH:
             velocity[0] = direction * speed;
             break;
         case OR_AI_TEMPLATE_PROJECTILE_BURST:
         case OR_AI_TEMPLATE_FAN_SHOT:
+            /* Keep vanilla shots until the exact NewProjectile overload is
+             * verified; the verified movement layer still constrains range. */
             velocity[0] = direction * (speed * 0.65f);
             velocity[1] = sinf((float)ai_tick * 0.18f) * 2.0f;
             break;
-        case OR_AI_TEMPLATE_PHASE:
         case OR_AI_TEMPLATE_BURROW:
-            velocity[1] = sinf((float)ai_tick * 0.22f) * speed;
+            /* Worms keep their native segment count and never teleport. */
+            velocity[0] = direction * (speed * 0.75f);
+            velocity[1] = sinf((float)ai_tick * 0.22f) * (speed * 0.20f);
+            break;
+        case OR_AI_TEMPLATE_PHASE:
+            velocity[0] = direction * (speed * 0.55f);
+            velocity[1] = sinf((float)ai_tick * 0.22f) * (speed * 0.35f);
             break;
         case OR_AI_TEMPLATE_SUMMON:
         case OR_AI_TEMPLATE_RAGE:
+            /* Summon/rage native calls remain gated; rage still gets a
+             * visible movement burst after its threshold. */
+            velocity[0] = direction * speed;
+            break;
         case OR_AI_TEMPLATE_NONE:
         default:
             velocity[0] = direction * (speed * 0.5f);
@@ -2432,9 +2462,13 @@ static void apply_special_ai(patch_handle_t instance, const OR_EliteRecord *reco
         if (applied_count < 64u) {
             ++applied_count;
             OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[AI_SPECIAL_APPLY] type=%u tier=%s template=%s velocity=%.2f,%.2f write=ok",
+                   "[AI_SPECIAL_APPLY] type=%u tier=%s phase=%s archetype=%s "
+                   "template=%s velocity=%.2f,%.2f write=ok",
                    (unsigned)npc_type, or_elite_tier_name(record->tier),
-                   ai_template_name(record->ai_plan.primary),
+                   or_ai_phase_name(ai_runtime->phase),
+                   or_ai_archetype_name(or_ai_classify_native_type(
+                       record->npc_type, record->native_ai_style, NULL)),
+                   ai_template_name(template),
                    (double)velocity[0], (double)velocity[1]);
         }
     }
@@ -2564,7 +2598,7 @@ static void ai_postfix(
                     ++ai_shadow_log_samples;
                     OR_LOG(MOD_LOG_LEVEL_INFO,
                            "[AI_SHADOW] type=%u tick=%u phase=%s->%s "
-                           "started=%s action=state-only writes=blocked",
+                           "started=%s action=phase-gated-velocity",
                            (unsigned)npc_type,
                            (unsigned)binding->ai_ticks,
                            or_ai_phase_name(phase_before),
@@ -2572,17 +2606,25 @@ static void ai_postfix(
                            shadow_started ? "yes" : "no");
                 }
             }
-            if (or_ai_try_trigger_rage(&record->ai_plan, &binding->ai_runtime,
-                                       binding->previous_life_ratio, current_ratio)) {
-                static uint32_t ai_shadow_rage_log_samples;
-                if (ai_shadow_rage_log_samples < 32u) {
-                    ++ai_shadow_rage_log_samples;
-                    OR_LOG(MOD_LOG_LEVEL_INFO,
-                           "[AI_SPECIAL_RAGE] type=%u rage=eligible state=triggered",
-                           (unsigned)npc_type);
+            {
+                bool rage_triggered_now = or_ai_try_trigger_rage(
+                    &record->ai_plan, &binding->ai_runtime,
+                    binding->previous_life_ratio, current_ratio);
+                if (rage_triggered_now) {
+                    static uint32_t ai_shadow_rage_log_samples;
+                    if (ai_shadow_rage_log_samples < 32u) {
+                        ++ai_shadow_rage_log_samples;
+                        OR_LOG(MOD_LOG_LEVEL_INFO,
+                               "[AI_SPECIAL_RAGE] type=%u threshold=%.2f state=triggered "
+                               "effect=active-velocity-burst",
+                               (unsigned)npc_type,
+                               (double)record->ai_plan.rage_threshold);
+                    }
                 }
+                apply_special_ai(instance, record, npc_type,
+                                 (uint32_t)binding->ai_ticks,
+                                 &binding->ai_runtime);
             }
-            apply_special_ai(instance, record, npc_type, (uint32_t)binding->ai_ticks);
         }
         binding->previous_life_ratio = current_ratio;
         return;

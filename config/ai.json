@@ -6,5 +6,8 @@
   "rageThreshold": 0.25,
   "archetypes": ["melee", "ranged", "flying", "worm", "swarm", "special"],
   "unknownAiStyleFallback": "melee",
-  "nativeExecution": "disabled-until-target-abi-verified"
+  "nativeExecution": "verified-velocity-phase-gated",
+  "projectileExecution": "disabled-until-NewProjectile-ABI-verified",
+  "summonExecution": "disabled-until-NPC-spawn-ABI-verified",
+  "fallback": "original-ai-first-and-preserved"
 }

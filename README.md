@@ -30,8 +30,8 @@ Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决
 - `Resources/config/general.json` 的开关、概率、活动上限和冷却会从 KernelLoader
   私有目录读取，非法值由统一验证器限幅。
 
-未经目标手机完整 ABI/顺序验证的特殊 AI 原生动作、颜色写入、额外物品生成、世界
-存档写入与客户端同步不会伪装成已完成；它们保留了核心策略、状态和能力探测，并按
+未经目标手机完整 ABI/顺序验证的特殊 AI 投射物/召唤/无敌动作、颜色写入、额外物品生成、世界
+存档写入与客户端同步不会伪装成已完成；已验证的速度行为会按 AI 阶段执行，其余保留核心策略、状态和能力探测，并按
 [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) 中的状态安全关闭。
 
 ## 参考模组迁移开关
@@ -46,7 +46,7 @@ Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决
 `Main.MouseText` 的已验证签名中映射到原版稀有度色板；同时保留原名和带前缀名称，兼容
 不同移动版渲染器传入的文本形式。播报文本还带有 Terraria 原生 `[c/色值:文本]` 标记，
 避免部分版本忽略 `Color` 结构体参数时所有播报变成同一种颜色。NPC 身体 `color` 写入和
-特殊 AI 位移仍是探测/安全关闭状态，不能把元数据探测当作功能完成。
+特殊 AI 已开放经过验证的阶段性位移；投射物、召唤和无敌动作仍由能力门控，不能把元数据探测当作这些动作已完成。
 
 播报颜色已按灾变体、终焉体、天气、地形、世界规则和 Boss 分组为显眼淡色，并会在日志
 中输出 `[BROADCAST_COLOR]` 方便真机核对。GitHub Actions 工作流位于
@@ -69,7 +69,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
 bash scripts/package_android_arm64.sh
 ```
 
-产物 `OriginRewrite-v1.0.32-v06-elite-loot-special-ai-arm64.zip` 可直接导入
+产物 `OriginRewrite-v1.0.33-v06-ai-archetype-phase-arm64.zip` 可直接导入
 TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
 [`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 

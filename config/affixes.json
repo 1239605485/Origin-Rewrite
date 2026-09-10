@@ -4,5 +4,7 @@
   "altered": ["swift", "tenacious", "berserk", "leech"],
   "calamity": ["charge", "shield", "longshot", "frost-or-heat"],
   "apocalypse": ["summon", "phase", "hell-barrage", "doomsday-rage"],
-  "nativeExecution": "capability-gated-safe-off"
+  "nativeExecution": "phase-gated-verified-velocity",
+  "unverifiedActions": ["projectile", "summon", "invulnerability"],
+  "fallback": "original-ai-first-and-preserved"
 }
