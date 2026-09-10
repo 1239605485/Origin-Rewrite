@@ -38,8 +38,9 @@ Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决
 
 本版本吸收了 EliteMonsters 的几个可靠做法：在 `NPCLoot` 后缀作为死亡边界、主机/单机
 权限判断、每个实例只结算一次、`Item.NewItem` 返回槽位的回读验证，以及失败时保留原版
-掉落。原生额外物品当前允许调用，但只有 `NewItem` 返回槽位的物品类型和堆叠回读同时
-匹配时才会标记奖励已结算；回读失败时保留原版掉落且不伪造额外奖励成功。
+掉落。原生额外物品当前允许调用；数组可读时要求 `NewItem` 返回槽位的物品类型和堆叠
+回读同时匹配，Android 数组不可读时使用已验证的 `NewItem` 返回槽位作为兼容验证；调用
+失败或返回无效槽位时保留原版掉落且不伪造额外奖励成功。
 
 名称颜色使用 `GivenOrTypeName`/`FullName` 实际显示路径登记名称，再在目标
 `Main.MouseText` 的已验证签名中映射到原版稀有度色板；同时保留原名和带前缀名称，兼容
@@ -68,7 +69,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
 bash scripts/package_android_arm64.sh
 ```
 
-产物 `OriginRewrite-v1.0.36-v07-world-rule-cycle-cn-arm64.zip` 可直接导入
+产物 `OriginRewrite-v1.0.38-v09-loot-pool-doc-cn-arm64.zip` 可直接导入
 TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
 [`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 

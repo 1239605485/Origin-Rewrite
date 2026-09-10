@@ -14,10 +14,11 @@ typedef struct OR_RewardEntry {
     OR_LootKind kind;
 } OR_RewardEntry;
 
-#define OR_ITEM_LIFE_CRYSTAL 29
+#define OR_ITEM_GEL 23
+#define OR_ITEM_WOODEN_ARROW 40
+#define OR_ITEM_MUSKET_BALL 97
 #define OR_ITEM_GOLDEN_CRATE 2336
 #define OR_ITEM_TITANIUM_CRATE 3981
-#define OR_ITEM_MANA_CRYSTAL 109
 #define OR_ITEM_FALLEN_STAR 75
 #define OR_ITEM_MAGIC_MIRROR 50
 #define OR_ITEM_HERMES_BOOTS 54
@@ -39,8 +40,6 @@ typedef struct OR_RewardEntry {
 #define OR_ITEM_CHLOROPHYTE_ORE 947
 #define OR_ITEM_CHLOROPHYTE_BAR 1006
 #define OR_ITEM_HALLOWED_BAR 1225
-#define OR_ITEM_LIFE_FRUIT 1291
-#define OR_ITEM_TEMPLE_KEY 1141
 #define OR_ITEM_ECTOPLASM 1508
 #define OR_ITEM_SHROOMITE_BAR 1552
 #define OR_ITEM_BEETLE_HUSK 2218
@@ -75,14 +74,14 @@ typedef struct OR_RewardEntry {
 
 static const OR_RewardEntry g_progress_reward_pools[OR_PROGRESS_COUNT][OR_PROGRESS_REWARD_POOL_SIZE] = {
     {
-        {OR_ITEM_LIFE_CRYSTAL, 1, 1, "LifeCrystal", OR_MATERIAL},
-        {OR_ITEM_MANA_CRYSTAL, 1, 1, "ManaCrystal", OR_MATERIAL},
+        {OR_ITEM_GEL, 15, 30, "Gel", OR_MATERIAL},
         {OR_ITEM_FALLEN_STAR, 3, 5, "FallenStar", OR_MATERIAL},
+        {OR_ITEM_WOODEN_ARROW, 20, 50, "WoodenArrow", OR_CONSUMABLE},
+        {OR_ITEM_HEALING_POTION, 2, 4, "HealingPotion", OR_CONSUMABLE},
         {OR_ITEM_MAGIC_MIRROR, 1, 1, "MagicMirror", OR_EQUIPMENT},
         {OR_ITEM_HERMES_BOOTS, 1, 1, "HermesBoots", OR_EQUIPMENT},
         {OR_ITEM_CLOUD_IN_A_BOTTLE, 1, 1, "CloudInABottle", OR_EQUIPMENT},
-        {OR_ITEM_HOOK, 1, 1, "Hook", OR_EQUIPMENT},
-        {OR_ITEM_HEALING_POTION, 2, 4, "HealingPotion", OR_CONSUMABLE}
+        {OR_ITEM_HOOK, 1, 1, "Hook", OR_EQUIPMENT}
     },
     {
         {OR_ITEM_COBALT_BAR, 2, 4, "CobaltBar", OR_MATERIAL},
@@ -90,9 +89,9 @@ static const OR_RewardEntry g_progress_reward_pools[OR_PROGRESS_COUNT][OR_PROGRE
         {OR_ITEM_ADAMANTITE_BAR, 2, 4, "AdamantiteBar", OR_MATERIAL},
         {OR_ITEM_SOUL_OF_LIGHT, 3, 6, "SoulOfLight", OR_MATERIAL},
         {OR_ITEM_SOUL_OF_NIGHT, 3, 6, "SoulOfNight", OR_MATERIAL},
+        {OR_ITEM_MUSKET_BALL, 20, 60, "MusketBall", OR_CONSUMABLE},
         {OR_ITEM_DEMON_WINGS, 1, 1, "DemonWings", OR_EQUIPMENT},
-        {OR_ITEM_ANGEL_WINGS, 1, 1, "AngelWings", OR_EQUIPMENT},
-        {OR_ITEM_GREATER_HEALING_POTION, 3, 6, "GreaterHealingPotion", OR_CONSUMABLE}
+        {OR_ITEM_ANGEL_WINGS, 1, 1, "AngelWings", OR_EQUIPMENT}
     },
     {
         {OR_ITEM_HALLOWED_BAR, 2, 4, "HallowedBar", OR_MATERIAL},
@@ -101,18 +100,18 @@ static const OR_RewardEntry g_progress_reward_pools[OR_PROGRESS_COUNT][OR_PROGRE
         {OR_ITEM_SOUL_OF_FRIGHT, 3, 6, "SoulOfFright", OR_MATERIAL},
         {OR_ITEM_SOUL_OF_MIGHT, 3, 6, "SoulOfMight", OR_MATERIAL},
         {OR_ITEM_SOUL_OF_SIGHT, 3, 6, "SoulOfSight", OR_MATERIAL},
-        {OR_ITEM_LIFE_FRUIT, 1, 1, "LifeFruit", OR_MATERIAL},
-        {OR_ITEM_GREATER_MANA_POTION, 3, 6, "GreaterManaPotion", OR_CONSUMABLE}
+        {OR_ITEM_GREATER_MANA_POTION, 3, 6, "GreaterManaPotion", OR_CONSUMABLE},
+        {OR_ITEM_HOOK, 1, 1, "Hook", OR_EQUIPMENT}
     },
     {
         {OR_ITEM_ECTOPLASM, 2, 4, "Ectoplasm", OR_MATERIAL},
         {OR_ITEM_SPECTRE_BAR, 2, 4, "SpectreBar", OR_MATERIAL},
         {OR_ITEM_SHROOMITE_BAR, 2, 4, "ShroomiteBar", OR_MATERIAL},
-        {OR_ITEM_TEMPLE_KEY, 1, 1, "TempleKey", OR_EQUIPMENT},
         {OR_ITEM_CHLOROPHYTE_BAR, 3, 6, "ChlorophyteBar", OR_MATERIAL},
-        {OR_ITEM_LIFE_FRUIT, 1, 1, "LifeFruit", OR_MATERIAL},
         {OR_ITEM_GREATER_HEALING_POTION, 4, 8, "GreaterHealingPotion", OR_CONSUMABLE},
-        {OR_ITEM_GREATER_MANA_POTION, 4, 8, "GreaterManaPotion", OR_CONSUMABLE}
+        {OR_ITEM_GREATER_MANA_POTION, 4, 8, "GreaterManaPotion", OR_CONSUMABLE},
+        {OR_ITEM_HOOK, 1, 1, "Hook", OR_EQUIPMENT},
+        {OR_ITEM_MAGIC_MIRROR, 1, 1, "MagicMirror", OR_EQUIPMENT}
     },
     {
         {OR_ITEM_LUNAR_BAR, 2, 5, "LunarBar", OR_MATERIAL},
@@ -120,9 +119,9 @@ static const OR_RewardEntry g_progress_reward_pools[OR_PROGRESS_COUNT][OR_PROGRE
         {OR_ITEM_BEETLE_HUSK, 2, 4, "BeetleHusk", OR_MATERIAL},
         {OR_ITEM_SHROOMITE_BAR, 2, 5, "ShroomiteBar", OR_MATERIAL},
         {OR_ITEM_CHLOROPHYTE_BAR, 4, 8, "ChlorophyteBar", OR_MATERIAL},
-        {OR_ITEM_LIFE_FRUIT, 1, 1, "LifeFruit", OR_MATERIAL},
         {OR_ITEM_GREATER_HEALING_POTION, 5, 10, "GreaterHealingPotion", OR_CONSUMABLE},
-        {OR_ITEM_GREATER_MANA_POTION, 5, 10, "GreaterManaPotion", OR_CONSUMABLE}
+        {OR_ITEM_GREATER_MANA_POTION, 5, 10, "GreaterManaPotion", OR_CONSUMABLE},
+        {OR_ITEM_MAGIC_MIRROR, 1, 1, "MagicMirror", OR_EQUIPMENT}
     }
 };
 
@@ -259,10 +258,14 @@ bool or_loot_build_policy(const OR_Config *config,
             int32_t item_type = 0;
             int32_t item_stack = 0;
             const char *item_name = NULL;
-            if (or_select_progress_item(&rng, context->progress, OR_LOOT_NONE,
+            OR_LootKind kind = or_prng_chance(&rng, 0.35f)
+                ? OR_LOOT_VANILLA_CONSUMABLE_POOL : OR_LOOT_VANILLA_MATERIAL_POOL;
+            if (or_select_progress_item(&rng, context->progress, kind,
                                          false, &item_type, &item_stack, &item_name)) {
-                or_set_extra(out_result, OR_LOOT_VANILLA_MATERIAL_POOL,
-                             "current_stage_vanilla_material_potion_or_ammo_pool",
+                or_set_extra(out_result, kind,
+                             kind == OR_LOOT_VANILLA_CONSUMABLE_POOL
+                                 ? "current_stage_vanilla_potion_or_ammo_pool"
+                                 : "current_stage_vanilla_material_pool",
                              item_type, item_stack, item_name);
             }
         }

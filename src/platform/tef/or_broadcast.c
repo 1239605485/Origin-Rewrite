@@ -412,15 +412,6 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
                          i == 0u ? "" : "、", world_rule_name_zh(snapshot->selected_ids[i]));
         if (n < 0 || (size_t)n >= sizeof(message) - len) return false;
     }
-    {
-        size_t len = strlen(message);
-        int n = snprintf(message + len, sizeof(message) - len,
-                         "；倍率 生命%.2f 伤害%.2f 防御%.2f",
-                         (double)snapshot->life_multiplier,
-                         (double)snapshot->damage_multiplier,
-                         (double)snapshot->defense_multiplier);
-        if (n < 0 || (size_t)n >= sizeof(message) - len) return false;
-    }
     if (!wrap_chat_color(message, sizeof(message), channel_hex("world_rule"))) return false;
     text = patchlib_string_create(message); if (!text) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,

@@ -1169,6 +1169,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
         int32_t slot_item_stack = -1;
         bool slot_read_ok = false;
         bool stack_read_ok = false;
+        bool native_slot_readback_available = false;
         if (position_ok) {
             memcpy(&position_x, position_raw, sizeof(position_x));
             memcpy(&position_y, position_raw + sizeof(position_x), sizeof(position_y));
@@ -1233,6 +1234,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
                                          &item_array);
                 if (item_array && patchlib_array_at(item_array, (size_t)result_slot,
                                                     &item_object) && item_object) {
+                    native_slot_readback_available = true;
                     void *type_ptr = NULL;
                     void *stack_ptr = NULL;
                     patchlib_field_get_value(g_adapter.runtime->item_field_type,
@@ -1280,26 +1282,36 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
                call_ok ? "ok" : "blocked_or_failed", call_ok ? "yes" : "no", (int)result_slot,
                slot_read_ok ? "ok" : "unavailable", (int)slot_item_type,
                (int)item_stack_arg, stack_read_ok ? "ok" : "unavailable", (int)slot_item_stack);
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[ITEM_WRITEBACK_VERIFY] expected=%d readback=%d match=%s stackReadback=%d "
-               "stackExpected=%d stackMatch=%s invoke=%s slot=%d verification=field-readback",
-               (int)item_type_arg, (int)slot_item_type,
-               slot_read_ok && item_type_arg == slot_item_type ? "yes" : "no",
-               (int)slot_item_stack, (int)item_stack_arg,
-               stack_read_ok && slot_item_stack == item_stack_arg ? "yes" : "no",
-               call_ok ? "ok" : "failed", (int)result_slot);
         {
-            bool writeback_verified = call_ok && slot_read_ok && stack_read_ok &&
-                                      item_type_arg == slot_item_type &&
-                                      item_stack_arg == slot_item_stack;
+            bool return_slot_verified = call_ok && result_slot >= 0;
+            bool field_verified = slot_read_ok && stack_read_ok &&
+                                  item_type_arg == slot_item_type &&
+                                  item_stack_arg == slot_item_stack;
+            bool writeback_verified = return_slot_verified &&
+                                      (!native_slot_readback_available || field_verified);
+            const char *verification = native_slot_readback_available
+                ? "field-readback" : "newitem-return-slot";
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[ITEM_WRITEBACK_VERIFY] expected=%d readback=%d match=%s stackReadback=%d "
+                   "stackExpected=%d stackMatch=%s invoke=%s slot=%d verification=%s",
+                   (int)item_type_arg, (int)slot_item_type,
+                   field_verified ? "yes" : "unavailable",
+                   (int)slot_item_stack, (int)item_stack_arg,
+                   field_verified ? "yes" : "unavailable",
+                   call_ok ? "ok" : "failed", (int)result_slot, verification);
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[EXTRA_LOOT_VERIFY] item=%s id=%d stack=%d resultSlot=%d "
+                   "verified=%s method=%s",
+                   drop_name, (int)item_type_arg, (int)item_stack_arg,
+                   (int)result_slot, writeback_verified ? "yes" : "no", verification);
             bool reward_claimed = writeback_verified &&
                                    or_state_claim_loot(g_adapter.state, binding->key);
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[EXTRA_LOOT_COMMIT] item=%s id=%d stack=%d claimed=%s "
-                   "writebackVerified=%s",
+                   "writebackVerified=%s verification=%s",
                    drop_name, (int)item_type_arg, (int)item_stack_arg,
                    reward_claimed ? "yes" : "no",
-                   writeback_verified ? "yes" : "no");
+                   writeback_verified ? "yes" : "no", verification);
         }
     }
 }
