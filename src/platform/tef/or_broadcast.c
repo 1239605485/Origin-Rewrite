@@ -49,6 +49,33 @@ static void tier_rgba(OR_EliteTier tier, uint8_t rgba[4]) {
     rgba[3] = (uint8_t)((packed >> 24) & 0xFFu);
 }
 
+static const char *tier_hex(OR_EliteTier tier) {
+    switch (tier) {
+    case OR_TIER_ALTERED: return "8FFFA8";
+    case OR_TIER_CALAMITY: return "80C7FF";
+    case OR_TIER_APOCALYPSE: return "F0A0FF";
+    default: return "FFFFFF";
+    }
+}
+
+static const char *channel_hex(const char *channel) {
+    if (!channel) return "FFFFFF";
+    if (strcmp(channel, "terrain") == 0) return "8AE7FF";
+    if (strcmp(channel, "weather") == 0) return "FFC477";
+    if (strcmp(channel, "world_rule") == 0) return "FFE08A";
+    if (strcmp(channel, "boss") == 0) return "FF9CA8";
+    return "FFFFFF";
+}
+
+static bool wrap_chat_color(char *message, size_t message_size,
+                            const char *hex) {
+    char body[256];
+    if (!message || !message_size || !hex) return false;
+    (void)snprintf(body, sizeof(body), "%s", message);
+    return snprintf(message, message_size, "[c/%s:%s]", hex, body) <
+           (int)message_size;
+}
+
 void or_broadcast_init(OR_BroadcastState *state) {
     if (state) {
         memset(state, 0, sizeof(*state));
@@ -188,7 +215,8 @@ bool or_broadcast_emit_elite(OR_BroadcastState *state,
                      : (tier == OR_TIER_CALAMITY
                          ? "【灾变体警报】世界规则发生偏移，灾变体已从裂缝中现身。"
                          : "【终焉体警报】重写波动越过边界，终焉体已降临。")) >=
-        (int)sizeof(message)) return false;
+                 (int)sizeof(message)) return false;
+    if (!wrap_chat_color(message, sizeof(message), tier_hex(tier))) return false;
     message_handle = patchlib_string_create(message);
     if (!message_handle) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -252,6 +280,7 @@ bool or_broadcast_emit_terrain(OR_BroadcastState *state,
                      terrain_depth_name(terrain.depth), terrain_biome_name(terrain.biome),
                      special[0] != '\0' ? special : "");
     if (count < 0 || count >= (int)sizeof(message)) return false;
+    if (!wrap_chat_color(message, sizeof(message), channel_hex("terrain"))) return false;
     string_handle = patchlib_string_create(message);
     if (!string_handle) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -307,6 +336,7 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
     count = snprintf(message, sizeof(message), "起源律动：%s·%s",
                      is_night ? "夜晚" : "白昼", weather_name);
     if (count < 0 || count >= (int)sizeof(message)) return false;
+    if (!wrap_chat_color(message, sizeof(message), channel_hex("weather"))) return false;
     string_handle = patchlib_string_create(message);
     if (!string_handle) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -365,6 +395,7 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
         if (len + 2u >= sizeof(message)) return false;
         message[len] = ')'; message[len + 1u] = '\0';
     }
+    if (!wrap_chat_color(message, sizeof(message), channel_hex("world_rule"))) return false;
     text = patchlib_string_create(message); if (!text) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[BROADCAST_COLOR] channel=world_rule rgba=%u,%u,%u,%u",
@@ -386,6 +417,7 @@ bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *r
     if (state->last_emit_tick && now_tick < state->last_emit_tick + 120u) return false;
     if (event != OR_BOSS_DIALOG_SPAWN && event != OR_BOSS_DIALOG_HALF && event != OR_BOSS_DIALOG_DEATH) return false;
     snprintf(message,sizeof(message), event == OR_BOSS_DIALOG_HALF ? "【首领回响】目标 #%u 的防线正在瓦解。" : (event == OR_BOSS_DIALOG_DEATH ? "【首领回响】目标 #%u 的回响已归于寂静。" : "【首领回响】目标 #%u 已被起源律动锁定。"), (unsigned)npc_type);
+    if (!wrap_chat_color(message, sizeof(message), channel_hex("boss"))) return false;
     text=patchlib_string_create(message); if (!text) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,"[BROADCAST_COLOR] channel=boss rgba=%u,%u,%u,%u",
            (unsigned)rgba[0],(unsigned)rgba[1],(unsigned)rgba[2],(unsigned)rgba[3]);

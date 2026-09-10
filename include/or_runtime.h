@@ -151,6 +151,7 @@ typedef struct OR_Runtime {
     patch_hook_id_t loot_hook_id;
     patch_hook_id_t loot_observer_hook_id;
     patch_hook_id_t strike_hook_id;
+    patch_hook_id_t display_name_hook_id;
     patch_hook_id_t mouse_text_hook_ids[OR_MOUSE_TEXT_METHOD_LIMIT];
     OR_RuntimeCapabilities capabilities;
 } OR_Runtime;

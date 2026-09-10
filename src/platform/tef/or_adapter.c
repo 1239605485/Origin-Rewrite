@@ -46,6 +46,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_COLOR_PROBE_LIMIT 16u
 #define OR_VISUAL_MEMBER_LIMIT 64u
 #define OR_VISUAL_METHOD_ARG_LIMIT 8u
+#define OR_NAME_COLOR_HOOK_LIMIT 128u
 #define ORIGINREWRITE_ENABLE_BOSS_DIALOG 0
 
 #define OR_DIAG_LOG(...) \
@@ -86,11 +87,18 @@ typedef struct OR_NativeBinding {
     OR_BossDialogAdapter boss_dialog;
 } OR_NativeBinding;
 
+typedef struct OR_NameColorHook {
+    bool occupied;
+    OR_EliteTier tier;
+    char text[256];
+} OR_NameColorHook;
+
 typedef struct OR_Adapter {
     OR_Runtime *runtime;
     OR_Config *config;
     OR_StateStore *state;
     OR_NativeBinding bindings[OR_MAX_TRACKED_NPCS];
+    OR_NameColorHook name_color_hooks[OR_NAME_COLOR_HOOK_LIMIT];
     uint64_t fallback_tick;
     uint32_t diagnostic_log_count;
     uint32_t stat_diagnostic_log_count;
@@ -137,6 +145,43 @@ static const char *terrain_depth_name(OR_DepthTag depth);
 static void capture_world_context(patch_handle_t instance, OR_TerrainSnapshot *terrain,
                                   OR_Weather *weather, bool *is_night);
 static uint64_t world_session_id(void);
+
+static void remember_name_color(const char *text, OR_EliteTier tier) {
+    size_t i;
+    size_t free_slot = OR_NAME_COLOR_HOOK_LIMIT;
+    if (!text || !text[0] || tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE) return;
+    for (i = 0u; i < OR_NAME_COLOR_HOOK_LIMIT; ++i) {
+        if (g_adapter.name_color_hooks[i].occupied) {
+            if (g_adapter.name_color_hooks[i].tier == tier &&
+                strcmp(g_adapter.name_color_hooks[i].text, text) == 0) return;
+        } else if (free_slot == OR_NAME_COLOR_HOOK_LIMIT) {
+            free_slot = i;
+        }
+    }
+    if (free_slot == OR_NAME_COLOR_HOOK_LIMIT) {
+        /* Reuse the oldest slot; names are only a rendering hint and must
+         * never be allowed to consume gameplay state. */
+        free_slot = 0u;
+    }
+    g_adapter.name_color_hooks[free_slot].occupied = true;
+    g_adapter.name_color_hooks[free_slot].tier = tier;
+    (void)snprintf(g_adapter.name_color_hooks[free_slot].text,
+                   sizeof(g_adapter.name_color_hooks[free_slot].text),
+                   "%s", text);
+}
+
+static OR_EliteTier remembered_name_tier(const char *text) {
+    size_t i;
+    if (!text || !text[0]) return OR_TIER_NONE;
+    for (i = 0u; i < OR_NAME_COLOR_HOOK_LIMIT; ++i) {
+        if (!g_adapter.name_color_hooks[i].occupied) continue;
+        if (strcmp(text, g_adapter.name_color_hooks[i].text) == 0 ||
+            strstr(text, g_adapter.name_color_hooks[i].text) != NULL) {
+            return g_adapter.name_color_hooks[i].tier;
+        }
+    }
+    return OR_TIER_NONE;
+}
 
 static void observe_player_rules(patch_handle_t instance) {
     OR_TerrainSnapshot terrain; OR_Weather weather; bool night; uint64_t tick=update_tick();
@@ -1638,10 +1683,14 @@ static bool write_given_name_marker(patch_handle_t instance,
     }
     if (name && name[0] != '\0') {
         if (strstr(name, prefix) != NULL) {
+            remember_name_color(name, tier);
             free(name);
             if (failure_reason) *failure_reason = "already_prefixed";
             return true;
         }
+        /* Keep both the vanilla name and the decorated name. Depending on
+         * the Terraria renderer, MouseText may receive either spelling. */
+        remember_name_color(name, tier);
         if (snprintf(decorated, sizeof(decorated), "%s·%s", prefix, name) >=
             (int)sizeof(decorated)) {
             free(name);
@@ -1662,6 +1711,7 @@ static bool write_given_name_marker(patch_handle_t instance,
         used_empty_fallback = true;
         reason = "empty_given_name_fallback";
     }
+    remember_name_color(decorated, tier);
     replacement = patchlib_string_create(decorated);
     if (!handle_valid(replacement)) {
         reason = "replacement_create_failed";
@@ -2499,6 +2549,39 @@ static bool install_prefix(patch_handle_t method, prefix_callback_t callback,
     return true;
 }
 
+static void display_name_color_postfix(patch_handle_t instance, void **args,
+                                       void *result,
+                                       const patch_method_signature_t *sig_info) {
+    patch_handle_t text_handle = PATCH_NULL;
+    char *text;
+    OR_EliteTier tier;
+    static uint32_t seen_count;
+    (void)instance;
+    (void)args;
+    (void)sig_info;
+    if (!result || !patchlib_string_cstr) return;
+    memcpy(&text_handle, result, sizeof(text_handle));
+    if (!text_handle) return;
+    text = patchlib_string_cstr(text_handle);
+    if (!text) return;
+    tier = remembered_name_tier(text);
+    if (tier == OR_TIER_NONE) {
+        if (strstr(text, "终焉体·") != NULL) tier = OR_TIER_APOCALYPSE;
+        else if (strstr(text, "灾变体·") != NULL) tier = OR_TIER_CALAMITY;
+        else if (strstr(text, "异化体·") != NULL) tier = OR_TIER_ALTERED;
+    }
+    if (tier != OR_TIER_NONE) {
+        remember_name_color(text, tier);
+        if (seen_count < 16u) {
+            ++seen_count;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[NAME_DISPLAY_SEEN] source=display_getter tier=%s name=%s",
+                   or_elite_tier_name(tier), text);
+        }
+    }
+    free(text);
+}
+
 static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
                                          const patch_method_signature_t *sig_info,
                                          void *result) {
@@ -2507,6 +2590,8 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
     int32_t rarity;
     int32_t replacement;
     const char *tier;
+    OR_EliteTier matched_tier;
+    static uint32_t seen_count;
     static uint32_t applied_count;
     (void)instance;
     (void)sig_info;
@@ -2516,18 +2601,24 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
     if (!text_handle) return true;
     text = patchlib_string_cstr(text_handle);
     if (!text) return true;
+    matched_tier = remembered_name_tier(text);
     /* FullName on this build may prepend the vanilla type name, so the
      * rewrite marker is not guaranteed to be at offset zero. */
-    if (strstr(text, "终焉体·") != NULL) {
+    if (matched_tier == OR_TIER_APOCALYPSE || strstr(text, "终焉体·") != NULL) {
         tier = "终焉体";
         replacement = 5; /* vanilla pink */
-    } else if (strstr(text, "灾变体·") != NULL) {
+    } else if (matched_tier == OR_TIER_CALAMITY || strstr(text, "灾变体·") != NULL) {
         tier = "灾变体";
         replacement = 9; /* vanilla cyan */
-    } else if (strstr(text, "异化体·") != NULL) {
+    } else if (matched_tier == OR_TIER_ALTERED || strstr(text, "异化体·") != NULL) {
         tier = "异化体";
         replacement = 7; /* vanilla lime */
     } else {
+        if (seen_count < 32u) {
+            ++seen_count;
+            OR_LOG(MOD_LOG_LEVEL_DEBUG,
+                   "[NAME_COLOR_SEEN] matched=no name=%s", text);
+        }
         free(text);
         return true;
     }
@@ -2624,6 +2715,21 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
            "[NAME_COLOR_API] MouseText=%s signature=%s",
            runtime->capabilities.name_color_hook_ready ? "available" : "unavailable",
            runtime->main_mouse_text_signature_ready ? "verified" : "safe_off");
+    if (runtime->method_display_name_get && runtime->display_name_hook_id == PATCH_HOOK_INVALID_ID) {
+        if (install_postfix(runtime->method_display_name_get,
+                            display_name_color_postfix,
+                            &runtime->display_name_hook_id)) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[NAME_DISPLAY_HOOK] installed=yes source=%s",
+                   runtime->property_display_name && patchlib_property_get_name &&
+                           patchlib_property_get_name(runtime->property_display_name)
+                       ? patchlib_property_get_name(runtime->property_display_name)
+                       : "display_getter");
+        } else {
+            OR_LOG(MOD_LOG_LEVEL_WARNING,
+                   "[NAME_DISPLAY_HOOK] installed=no reason=hook_install_failed");
+        }
+    }
     {
         size_t mouse_text_hooks = 0u;
         for (i = 0u; i < runtime->main_mouse_text_method_count &&

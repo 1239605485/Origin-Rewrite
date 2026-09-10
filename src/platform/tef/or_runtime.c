@@ -1093,6 +1093,7 @@ void or_runtime_init(OR_Runtime *runtime) {
     runtime->loot_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->loot_observer_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
+    runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }
@@ -1898,7 +1899,14 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
      * getter ABI. FullName is preferred, TypeName is an automatic fallback. */
     if (patchlib_type_get_property && patchlib_property_get_get_method &&
         patchlib_method_get_signature && tefstd_vector_size && tefstd_vector_at) {
-        static const char *const display_names[] = {"FullName", "TypeName"};
+        /* The mobile build's NPC overhead-name path is based on
+         * GivenOrTypeName. FullName is kept as the next fallback because
+         * some builds expose only that property. This ordering mirrors the
+         * reference EliteMonsters hook and makes the name-color registry see
+         * the actual string used by the renderer. */
+        static const char *const display_names[] = {
+            "GivenOrTypeName", "FullName", "TypeName"
+        };
         for (i = 0; i < sizeof(display_names) / sizeof(display_names[0]); ++i) {
             property = patchlib_type_get_property(runtime->npc_type,
                                                   display_names[i]);
@@ -2364,6 +2372,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_uninstall_hook(&runtime->loot_hook_id);
     or_uninstall_hook(&runtime->loot_observer_hook_id);
     or_uninstall_hook(&runtime->strike_hook_id);
+    or_uninstall_hook(&runtime->display_name_hook_id);
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         or_uninstall_hook(&runtime->mouse_text_hook_ids[i]);
     }
@@ -2463,6 +2472,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     runtime->loot_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->loot_observer_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
+    runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }

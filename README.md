@@ -42,9 +42,11 @@ Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决
 `enableNativeExtraLoot` 必须在目标版本确认 `NewItem` 九参数 ABI、`ItemID` 和物品槽位
 回读都正常后才可手动打开；打开后也只测试一个 Gel，不会直接启用完整掉落池。
 
-名称颜色使用已验证的名称前缀，并在目标 `Main.MouseText` 的 7 参数签名通过探测后映射到
-原版稀有度色板；签名不匹配时自动 SAFE-OFF。NPC 身体 `color` 写入和特殊 AI 位移仍是
-探测/安全关闭状态，不能把元数据探测当作功能完成。
+名称颜色使用 `GivenOrTypeName`/`FullName` 实际显示路径登记名称，再在目标
+`Main.MouseText` 的已验证签名中映射到原版稀有度色板；同时保留原名和带前缀名称，兼容
+不同移动版渲染器传入的文本形式。播报文本还带有 Terraria 原生 `[c/色值:文本]` 标记，
+避免部分版本忽略 `Color` 结构体参数时所有播报变成同一种颜色。NPC 身体 `color` 写入和
+特殊 AI 位移仍是探测/安全关闭状态，不能把元数据探测当作功能完成。
 
 播报颜色已按灾变体、终焉体、天气、地形、世界规则和 Boss 分组为显眼淡色，并会在日志
 中输出 `[BROADCAST_COLOR]` 方便真机核对。GitHub Actions 工作流位于
@@ -67,7 +69,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
 bash scripts/package_android_arm64.sh
 ```
 
-产物 `OriginRewrite-v1.0.26-color-abi-name-hook-arm64.zip` 可直接导入
+产物 `OriginRewrite-v1.0.27-name-broadcast-color-fix-arm64.zip` 可直接导入
 TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
 [`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 
