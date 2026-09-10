@@ -4,6 +4,7 @@
   "author": "liuxin",
   "version": "1.0.0",
   "versionCode": 2026091100,
+  "icon": "icon.png",
   "brieflyDescribe": "起源重构 v1.0：让世界规则、地形天气与重构体共同演化。",
   "description": "核心功能：三档重构体、随机世界规则、地形与天气快照、专属怪物 AI，以及保留原版掉落的额外奖励。仅支持 Android ARM64 单机。",
   "features": [
