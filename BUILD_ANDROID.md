@@ -24,6 +24,7 @@ OriginRewrite-v1.0.0.zip
 ├── Manifest.json
 ├── Info.json
 ├── OriginRewrite.json
+├── icon.png
 └── Resources/
     ├── lib/libOriginRewrite.android.arm64.so
     ├── config/*.json

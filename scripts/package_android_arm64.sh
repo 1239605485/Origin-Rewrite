@@ -34,6 +34,8 @@ cd "$ROOT_DIR"
 PACKAGE_DIR="$WORK_DIR/OriginRewrite"
 mkdir -p "$PACKAGE_DIR/Resources/lib" "$PACKAGE_DIR/Resources/config"
 cp "$ROOT_DIR/Manifest.json" "$ROOT_DIR/Info.json" "$ROOT_DIR/OriginRewrite.json" "$PACKAGE_DIR/"
+test -s "$ROOT_DIR/icon.png"
+cp "$ROOT_DIR/icon.png" "$PACKAGE_DIR/icon.png"
 cp -a "$ROOT_DIR/Resources/lang" "$PACKAGE_DIR/Resources/"
 cp "$ROOT_DIR"/config/*.json "$PACKAGE_DIR/Resources/config/"
 cp "$WORK_DIR/libs/arm64-v8a/libOriginRewrite.so" \
