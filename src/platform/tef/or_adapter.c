@@ -1631,6 +1631,33 @@ static void probe_color_member(patch_handle_t instance, uint32_t npc_type) {
            (unsigned long long)getter_raw);
 }
 
+static bool write_name_color_marker(patch_handle_t instance, OR_EliteTier tier,
+                                    uint32_t npc_type) {
+    uint64_t packed;
+    uint8_t rgba[4];
+    uint64_t readback = 0u;
+    if (!instance || !g_adapter.runtime ||
+        !g_adapter.runtime->capabilities.color_marker_ready ||
+        !g_adapter.runtime->field_color || !patchlib_field_get_value) return false;
+    switch (tier) {
+    case OR_TIER_ALTERED: rgba[0]=143u; rgba[1]=255u; rgba[2]=168u; break;
+    case OR_TIER_CALAMITY: rgba[0]=128u; rgba[1]=199u; rgba[2]=255u; break;
+    case OR_TIER_APOCALYPSE: rgba[0]=240u; rgba[1]=160u; rgba[2]=255u; break;
+    default: return false;
+    }
+    rgba[3] = 255u;
+    packed = (uint64_t)rgba[0] | ((uint64_t)rgba[1] << 8) |
+             ((uint64_t)rgba[2] << 16) | ((uint64_t)rgba[3] << 24);
+    if (!field_write(g_adapter.runtime->field_color, instance, &packed)) return false;
+    (void)patchlib_field_get_value(g_adapter.runtime->field_color, instance, &readback);
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[COLOR_WRITE] type=%u tier=%s rgba=%u,%u,%u,%u writeOk=yes readback=%016llx",
+           (unsigned)npc_type, or_elite_tier_name(tier), (unsigned)rgba[0],
+           (unsigned)rgba[1], (unsigned)rgba[2], (unsigned)rgba[3],
+           (unsigned long long)readback);
+    return true;
+}
+
 static bool write_given_name_marker(patch_handle_t instance,
                                     OR_EliteTier tier,
                                     const char **failure_reason) {
@@ -2145,6 +2172,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         }
     }
     probe_color_member(instance, npc_type);
+    (void)write_name_color_marker(instance, spawn.tier, npc_type);
     {
         bool write_ok = apply_final_stats(instance, &record->final_stats);
         int32_t readback_life_max = -1;
@@ -2729,6 +2757,11 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
             OR_LOG(MOD_LOG_LEVEL_WARNING,
                    "[NAME_DISPLAY_HOOK] installed=no reason=hook_install_failed");
         }
+    }
+    if (runtime->method_display_name_get_alt && runtime->display_name_hook_id_alt == PATCH_HOOK_INVALID_ID) {
+        (void)install_postfix(runtime->method_display_name_get_alt,
+                              display_name_color_postfix,
+                              &runtime->display_name_hook_id_alt);
     }
     {
         size_t mouse_text_hooks = 0u;

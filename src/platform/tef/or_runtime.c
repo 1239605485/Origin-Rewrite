@@ -1094,6 +1094,7 @@ void or_runtime_init(OR_Runtime *runtime) {
     runtime->loot_observer_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
+    runtime->display_name_hook_id_alt = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }
@@ -1742,18 +1743,15 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
             if (!component_ok) layout_ok = false;
             or_release_handle(component);
         }
-        /* The layout is useful for diagnostics only. Body tint is explicitly
-         * disabled for the current safe-mode visual test, so this capability
-         * must never advertise a live write path. */
-        runtime->capabilities.color_marker_ready = false;
         runtime->capabilities.color_value_layout_ready = layout_ok &&
             patchlib_field_get_size(runtime->field_color) == 8u;
+        runtime->capabilities.color_marker_ready = runtime->capabilities.color_value_layout_ready;
         OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
-                       "[COLOR_ABI_GATE] layout=%s valueApi=%s write=disabled "
-                       "reason=body_tint_safe_off",
+                       "[COLOR_ABI_GATE] layout=%s valueApi=%s write=%s",
                        layout_ok ? "verified" : "unverified",
                        runtime->capabilities.color_value_layout_ready
-                           ? "available_read_only" : "unavailable");
+                           ? "available" : "unavailable",
+                       runtime->capabilities.color_marker_ready ? "enabled" : "disabled");
     }
 
     /* NewDust is the smallest widely available vanilla particle entry point.
@@ -1921,9 +1919,21 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
                 (void)patchlib_method_signature_free(&getter_sig);
             }
             if (getter_ok) {
-                runtime->property_display_name = property;
-                runtime->method_display_name_get = getter;
-                break;
+                if (!runtime->method_display_name_get) {
+                    runtime->property_display_name = property;
+                    runtime->method_display_name_get = getter;
+                } else if (!runtime->method_display_name_get_alt) {
+                    runtime->property_display_name_alt = property;
+                    runtime->method_display_name_get_alt = getter;
+                } else {
+                    or_release_handle(property);
+                    or_release_handle(getter);
+                }
+                if (runtime->method_display_name_get == getter ||
+                    runtime->method_display_name_get_alt == getter) {
+                    property = PATCH_NULL;
+                    getter = PATCH_NULL;
+                }
             }
             or_release_handle(property);
             or_release_handle(getter);
@@ -2373,6 +2383,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_uninstall_hook(&runtime->loot_observer_hook_id);
     or_uninstall_hook(&runtime->strike_hook_id);
     or_uninstall_hook(&runtime->display_name_hook_id);
+    or_uninstall_hook(&runtime->display_name_hook_id_alt);
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         or_uninstall_hook(&runtime->mouse_text_hook_ids[i]);
     }
@@ -2408,6 +2419,8 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->method_given_name_set);
     or_release_handle(runtime->property_display_name);
     or_release_handle(runtime->method_display_name_get);
+    or_release_handle(runtime->property_display_name_alt);
+    or_release_handle(runtime->method_display_name_get_alt);
     or_release_handle(runtime->main_game_mode);
     or_release_handle(runtime->main_zenith_world);
     or_release_handle(runtime->main_hard_mode);
@@ -2473,6 +2486,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     runtime->loot_observer_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
+    runtime->display_name_hook_id_alt = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }

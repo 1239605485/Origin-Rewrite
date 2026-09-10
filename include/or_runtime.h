@@ -84,6 +84,8 @@ typedef struct OR_Runtime {
     patch_handle_t method_given_name_set;
     patch_handle_t property_display_name;
     patch_handle_t method_display_name_get;
+    patch_handle_t property_display_name_alt;
+    patch_handle_t method_display_name_get_alt;
 
     patch_handle_t main_game_mode;
     patch_handle_t main_zenith_world;
@@ -152,6 +154,7 @@ typedef struct OR_Runtime {
     patch_hook_id_t loot_observer_hook_id;
     patch_hook_id_t strike_hook_id;
     patch_hook_id_t display_name_hook_id;
+    patch_hook_id_t display_name_hook_id_alt;
     patch_hook_id_t mouse_text_hook_ids[OR_MOUSE_TEXT_METHOD_LIMIT];
     OR_RuntimeCapabilities capabilities;
 } OR_Runtime;
