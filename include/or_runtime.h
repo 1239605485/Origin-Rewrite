@@ -108,10 +108,12 @@ typedef struct OR_Runtime {
     patch_handle_t main_day_time;
     patch_handle_t main_blood_moon;
     patch_handle_t main_raining;
+    patch_handle_t main_sandstorm;
     patch_handle_t main_eclipse;
     patch_handle_t main_pumpkin_moon;
     patch_handle_t main_snow_moon;
     patch_handle_t main_slime_rain;
+    patch_handle_t main_wind_strength;
     patch_handle_t main_world_surface;
     patch_handle_t main_rock_layer;
     patch_handle_t main_underworld_layer;

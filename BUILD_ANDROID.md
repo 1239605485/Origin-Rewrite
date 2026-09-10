@@ -20,7 +20,7 @@ bash scripts/package_android_arm64.sh
 ## 安装包布局
 
 ```text
-OriginRewrite-v1.0.34-v06-ai-full-actions-arm64.zip
+OriginRewrite-v1.0.35-v06-flying-dive-world-environment-arm64.zip
 ├── Manifest.json
 ├── Info.json
 ├── OriginRewrite.json
@@ -42,7 +42,7 @@ TEFManager 安装时会把 `Resources` 内容放入模组私有目录，运行�
 3. 确认 `[ENTRY_PROBE]` 同时接受 `SetDefaults(int32,pointer)` 和无参 `AI()`。
 4. 生成多个普通敌怪，核对 `[ROLL]`、`stat_write`、`[NAME_READBACK]`、`[COLOR_WRITE]`、名称前缀和活动上限。
 5. 观察 `[BROADCAST_COMMIT]` 的 messageId 是否递增，以及 `[TERRAIN_BROADCAST_COMMIT]` 是否出现。
-6. 观察 `[AI_SHADOW]` 的五阶段切换、`[AI_SPECIAL_APPLY] phase=active`、`[AI_PROJECTILE_SPAWN]`、`[AI_SUMMON_SPAWN]` 和 `[AI_PHASE_IMMUNITY]`。
+6. 观察 `[AI_SHADOW]` 的五阶段切换、`[AI_FLYING_PATROL]`、`[AI_FLYING_DIVE_TARGET]`、`[AI_FLYING_DIVE]`、`[AI_SPECIAL_APPLY] phase=active`、`[AI_PROJECTILE_SPAWN]`、`[AI_SUMMON_SPAWN]` 和 `[AI_PHASE_IMMUNITY]`。
 7. 额外掉落检查 `[ITEM_WRITEBACK_VERIFY]`；只有 `match=yes` 才算额外奖励成功。多人客户端暂不作为验收目标。
 
 未经日志验证前不要打开 `feature_fallbacks.json` 所标识的危险原生能力。当前安装包的

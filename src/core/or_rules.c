@@ -30,6 +30,10 @@ const char *or_weather_name(OR_Weather weather) {
         case OR_WEATHER_BLIZZARD: return "blizzard";
         case OR_WEATHER_ECLIPSE: return "eclipse";
         case OR_WEATHER_BLOOD_MOON: return "blood_moon";
+        case OR_WEATHER_PUMPKIN_MOON: return "pumpkin_moon";
+        case OR_WEATHER_SNOW_MOON: return "snow_moon";
+        case OR_WEATHER_SLIME_RAIN: return "slime_rain";
+        case OR_WEATHER_WINDY: return "windy";
         case OR_WEATHER_CLEAR: return "clear";
         default: return "unknown";
     }
@@ -75,6 +79,22 @@ static OR_ElementTag or_element_for_biome(OR_BiomeTag biome) {
     if (biome == OR_BIOME_JUNGLE) return OR_ELEMENT_TOXIC;
     if (biome == OR_BIOME_CORRUPTION) return OR_ELEMENT_CORRUPT;
     if (biome == OR_BIOME_CRIMSON) return OR_ELEMENT_CRIMSON;
+    return OR_ELEMENT_NONE;
+}
+
+static OR_ElementTag or_element_for_context(const OR_TerrainSnapshot *terrain,
+                                            OR_DepthTag depth,
+                                            OR_Weather weather) {
+    OR_ElementTag element;
+    if (!terrain) return OR_ELEMENT_NONE;
+    element = or_element_for_biome(terrain->biome);
+    if (element != OR_ELEMENT_NONE) return element;
+    if (depth == OR_DEPTH_UNDERWORLD || weather == OR_WEATHER_PUMPKIN_MOON) {
+        return OR_ELEMENT_HEAT;
+    }
+    if (weather == OR_WEATHER_BLIZZARD || weather == OR_WEATHER_SNOW_MOON) {
+        return OR_ELEMENT_FROST;
+    }
     return OR_ELEMENT_NONE;
 }
 
@@ -164,10 +184,27 @@ static void or_apply_context_modifiers(OR_RuleSnapshot *snapshot) {
     }
     if (snapshot->weather == OR_WEATHER_ECLIPSE) {
         snapshot->reward_quality_multiplier *= 1.10f;
+        snapshot->tier_weight_multiplier[OR_TIER_CALAMITY] *= 1.10f;
+        snapshot->tier_weight_multiplier[OR_TIER_APOCALYPSE] *= 1.10f;
     }
-    if ((snapshot->active_mask & (1u << OR_RULE_EVIL_INFECTION)) != 0u &&
-        snapshot->preferred_element == OR_ELEMENT_NONE) {
-        snapshot->preferred_element = or_element_for_biome(snapshot->terrain.biome);
+    if (snapshot->weather == OR_WEATHER_RAIN) {
+        snapshot->ai_intensity *= 1.05f;
+    } else if (snapshot->weather == OR_WEATHER_SANDSTORM) {
+        snapshot->movement_multiplier *= 1.10f;
+        snapshot->ai_intensity *= 1.05f;
+    } else if (snapshot->weather == OR_WEATHER_BLIZZARD ||
+               snapshot->weather == OR_WEATHER_SNOW_MOON) {
+        snapshot->ai_intensity *= 1.05f;
+    } else if (snapshot->weather == OR_WEATHER_PUMPKIN_MOON ||
+               snapshot->weather == OR_WEATHER_SLIME_RAIN) {
+        snapshot->ai_intensity *= 1.08f;
+    } else if (snapshot->weather == OR_WEATHER_WINDY) {
+        snapshot->movement_multiplier *= 1.08f;
+        snapshot->ai_intensity *= 1.03f;
+    }
+    if (snapshot->preferred_element == OR_ELEMENT_NONE) {
+        snapshot->preferred_element = or_element_for_context(
+            &snapshot->terrain, snapshot->terrain.depth, snapshot->weather);
     }
 }
 
@@ -276,6 +313,7 @@ void or_rules_finalize(const OR_Config *config, OR_RuleSnapshot *snapshot) {
     int32_t max_defense_flat = 4;
     float max_chance = 2.0f;
     float max_movement = 1.50f;
+    float max_ai_intensity = 2.50f;
     uint32_t selected_ids[OR_MAX_WORLD_RULES];
     uint32_t active_mask;
     size_t selected_count;
@@ -300,6 +338,7 @@ void or_rules_finalize(const OR_Config *config, OR_RuleSnapshot *snapshot) {
         max_reward_multiplier = config->caps.rule_reward_multiplier_max;
         max_defense_flat = config->caps.rule_defense_flat_max;
         max_chance = config->caps.rule_chance_max;
+        max_ai_intensity = config->caps.rule_ai_intensity_max;
     }
     if (min_multiplier > max_multiplier) {
         min_multiplier = 0.75f;
@@ -358,6 +397,8 @@ void or_rules_finalize(const OR_Config *config, OR_RuleSnapshot *snapshot) {
     if (snapshot->elite_chance_multiplier > max_chance) snapshot->elite_chance_multiplier = max_chance;
     if (snapshot->movement_multiplier < 1.0f) snapshot->movement_multiplier = 1.0f;
     if (snapshot->movement_multiplier > max_movement) snapshot->movement_multiplier = max_movement;
+    if (snapshot->ai_intensity < 1.0f) snapshot->ai_intensity = 1.0f;
+    if (snapshot->ai_intensity > max_ai_intensity) snapshot->ai_intensity = max_ai_intensity;
     for (i = 0; i < OR_TIER_COUNT; ++i) {
         if (snapshot->tier_weight_multiplier[i] < 0.50f) snapshot->tier_weight_multiplier[i] = 0.50f;
         if (snapshot->tier_weight_multiplier[i] > 2.00f) snapshot->tier_weight_multiplier[i] = 2.00f;

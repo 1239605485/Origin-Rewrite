@@ -2177,7 +2177,7 @@ static void or_resolve_ai_method(OR_Runtime *runtime) {
 
 static void or_resolve_loot_method(OR_Runtime *runtime) {
     patch_handle_t method = PATCH_NULL;
-    if (!runtime || !patchlib_type_get_method_by_param_count) return;
+    if (!runtime) return;
     method = patchlib_type_get_method_by_param_count(runtime->npc_type, "NPCLoot", 0);
     if (or_method_is_instance_void_zero(method)) {
         runtime->method_npcloot = method;
@@ -2225,11 +2225,13 @@ static void or_resolve_ai_factories(OR_Runtime *runtime) {
     /* Terraria exposes both the compact and extended NPC.NewNPC overloads.
      * Resolve only exact static signatures; the returned handle is later
      * used by the host-authoritative summon action. */
-    for (i = 0u; i < 2u; ++i) {
+    for (i = 0u; i < 2u && !runtime->npc_new_npc_signature_ready; ++i) {
         int arg_count = i == 0u ? 4 : 10;
         const patch_type_t *expected = i == 0u ? npc_args4 : npc_args10;
-        method = patchlib_type_get_method_by_param_count(
-            runtime->npc_type, "NewNPC", (size_t)arg_count);
+        method = patchlib_type_get_method_by_param_count
+            ? patchlib_type_get_method_by_param_count(
+                runtime->npc_type, "NewNPC", (size_t)arg_count)
+            : PATCH_NULL;
         if (or_runtime_signature_matches(method, false, PATCH_INT32,
                                          expected, (size_t)arg_count)) {
             runtime->method_npc_new_npc = method;
@@ -2244,6 +2246,49 @@ static void or_resolve_ai_factories(OR_Runtime *runtime) {
         }
         or_release_handle(method);
         method = PATCH_NULL;
+    }
+
+    /* Some mobile metadata builds do not expose overloads through
+     * get_method_by_param_count even though the methods are present. Scan the
+     * complete method table before declaring the action unavailable. */
+    if (!runtime->npc_new_npc_signature_ready && patchlib_type_get_methods &&
+        patchlib_method_get_name && patchlib_method_get_signature &&
+        tefstd_vector_init && tefstd_vector_size && tefstd_vector_at &&
+        tefstd_vector_destroy) {
+        tefstd_vector_t methods = {0};
+        if (tefstd_vector_init(&methods, sizeof(patch_handle_t)) &&
+            patchlib_type_get_methods(runtime->npc_type, true, &methods)) {
+            for (i = 0u; i < tefstd_vector_size(&methods); ++i) {
+                patch_handle_t *entry = (patch_handle_t *)tefstd_vector_at(&methods, i);
+                patch_handle_t candidate = entry ? *entry : PATCH_NULL;
+                const char *name = candidate && patchlib_method_get_name
+                    ? patchlib_method_get_name(candidate) : NULL;
+                if (!name || strcmp(name, "NewNPC") != 0) continue;
+                if (or_runtime_signature_matches(candidate, false, PATCH_INT32,
+                                                 npc_args4, 4u)) {
+                    runtime->method_npc_new_npc = candidate;
+                    runtime->npc_new_npc_arg_count = 4;
+                    runtime->npc_new_npc_signature_ready = true;
+                    runtime->capabilities.npc_spawn_factory_ready = true;
+                    break;
+                }
+                if (or_runtime_signature_matches(candidate, false, PATCH_INT32,
+                                                 npc_args10, 10u)) {
+                    runtime->method_npc_new_npc = candidate;
+                    runtime->npc_new_npc_arg_count = 10;
+                    runtime->npc_new_npc_signature_ready = true;
+                    runtime->capabilities.npc_spawn_factory_ready = true;
+                    break;
+                }
+            }
+        }
+        tefstd_vector_destroy(&methods);
+        if (runtime->npc_new_npc_signature_ready) {
+            OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                           "[AI_FACTORY] NPC.NewNPC ready=yes source=method_scan args=%d "
+                           "authority=host-or-singleplayer",
+                           runtime->npc_new_npc_arg_count);
+        }
     }
 
     projectile_type = patchlib_type_get_type
@@ -2263,6 +2308,43 @@ static void or_resolve_ai_factories(OR_Runtime *runtime) {
             or_release_handle(method);
         }
     }
+    if (projectile_type && !runtime->projectile_new_projectile_signature_ready &&
+        patchlib_type_get_methods && patchlib_method_get_name &&
+        patchlib_method_get_signature && tefstd_vector_init &&
+        tefstd_vector_size && tefstd_vector_at && tefstd_vector_destroy) {
+        tefstd_vector_t methods = {0};
+        if (tefstd_vector_init(&methods, sizeof(patch_handle_t)) &&
+            patchlib_type_get_methods(projectile_type, true, &methods)) {
+            for (i = 0u; i < tefstd_vector_size(&methods); ++i) {
+                patch_handle_t *entry = (patch_handle_t *)tefstd_vector_at(&methods, i);
+                patch_handle_t candidate = entry ? *entry : PATCH_NULL;
+                const char *name = candidate && patchlib_method_get_name
+                    ? patchlib_method_get_name(candidate) : NULL;
+                if (!name || strcmp(name, "NewProjectile") != 0) continue;
+                if (or_runtime_signature_matches(candidate, false, PATCH_INT32,
+                                                 projectile_args, 10u)) {
+                    runtime->method_projectile_new_projectile = candidate;
+                    runtime->projectile_new_projectile_signature_ready = true;
+                    runtime->capabilities.projectile_factory_ready = true;
+                    break;
+                }
+            }
+        }
+        tefstd_vector_destroy(&methods);
+        if (runtime->projectile_new_projectile_signature_ready) {
+            OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                           "[AI_FACTORY] Projectile.NewProjectile ready=yes "
+                           "source=method_scan args=10 authority=host-or-singleplayer");
+        }
+    }
+    if (!runtime->npc_new_npc_signature_ready) {
+        OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                       "[AI_FACTORY] NPC.NewNPC ready=no reason=exact_signature_not_found");
+    }
+    if (!runtime->projectile_new_projectile_signature_ready) {
+        OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                       "[AI_FACTORY] Projectile.NewProjectile ready=no reason=exact_signature_not_found");
+    }
     or_release_handle(projectile_type);
 }
 
@@ -2273,10 +2355,12 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     static const char *const day_time_names[] = {"dayTime"};
     static const char *const blood_moon_names[] = {"bloodMoon"};
     static const char *const raining_names[] = {"raining"};
+    static const char *const sandstorm_names[] = {"sandStorm", "sandstorm", "sandStormActive"};
     static const char *const eclipse_names[] = {"eclipse"};
     static const char *const pumpkin_moon_names[] = {"pumpkinMoon"};
     static const char *const snow_moon_names[] = {"snowMoon"};
     static const char *const slime_rain_names[] = {"slimeRain"};
+    static const char *const wind_strength_names[] = {"windSpeedCurrent", "windSpeed", "wind"};
     patch_handle_t main_type;
     bool fields_ok;
     if (!runtime) return false;
@@ -2369,6 +2453,9 @@ bool or_runtime_probe(OR_Runtime *runtime) {
         runtime->main_raining = or_resolve_field_any(
             main_type, raining_names, sizeof(raining_names) / sizeof(raining_names[0]),
             false, PATCH_BOOL, sizeof(bool));
+        runtime->main_sandstorm = or_resolve_field_any(
+            main_type, sandstorm_names, sizeof(sandstorm_names) / sizeof(sandstorm_names[0]),
+            false, PATCH_BOOL, sizeof(bool));
         runtime->main_eclipse = or_resolve_field_any(
             main_type, eclipse_names, sizeof(eclipse_names) / sizeof(eclipse_names[0]),
             false, PATCH_BOOL, sizeof(bool));
@@ -2381,6 +2468,10 @@ bool or_runtime_probe(OR_Runtime *runtime) {
         runtime->main_slime_rain = or_resolve_field_any(
             main_type, slime_rain_names, sizeof(slime_rain_names) / sizeof(slime_rain_names[0]),
             false, PATCH_BOOL, sizeof(bool));
+        runtime->main_wind_strength = or_resolve_field_any(
+            main_type, wind_strength_names,
+            sizeof(wind_strength_names) / sizeof(wind_strength_names[0]),
+            false, PATCH_FLOAT, sizeof(float));
         runtime->main_world_surface = or_resolve_field(
             main_type, "worldSurface", false, PATCH_DOUBLE, sizeof(double));
         runtime->main_rock_layer = or_resolve_field(
@@ -2556,10 +2647,12 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->main_day_time);
     or_release_handle(runtime->main_blood_moon);
     or_release_handle(runtime->main_raining);
+    or_release_handle(runtime->main_sandstorm);
     or_release_handle(runtime->main_eclipse);
     or_release_handle(runtime->main_pumpkin_moon);
     or_release_handle(runtime->main_snow_moon);
     or_release_handle(runtime->main_slime_rain);
+    or_release_handle(runtime->main_wind_strength);
     or_release_handle(runtime->main_world_surface);
     or_release_handle(runtime->main_rock_layer);
     or_release_handle(runtime->main_underworld_layer);

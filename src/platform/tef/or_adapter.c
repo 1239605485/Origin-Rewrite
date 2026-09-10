@@ -138,6 +138,8 @@ typedef struct OR_Adapter {
     patch_handle_t last_player_identity;
     OR_TerrainSnapshot last_player_terrain;
     bool last_player_terrain_valid;
+    float last_player_position[2];
+    bool last_player_position_valid;
     OR_BossDialogAdapter boss_dialog_by_type[1024];
     bool boss_active_by_type[1024];
 } OR_Adapter;
@@ -206,6 +208,7 @@ static void observe_player_rules(patch_handle_t instance) {
                                               PATCH_NULL, &player_identity, NULL);
         if (player_identity && player_identity != g_adapter.last_player_identity) {
             g_adapter.last_player_identity = player_identity;
+            g_adapter.last_player_position_valid = false;
             g_adapter.world_bootstrap_emitted = false;
             g_adapter.rule_summary_emitted = false;
             or_player_rule_adapter_init(&g_adapter.player_rules);
@@ -243,7 +246,7 @@ static void observe_player_rules(patch_handle_t instance) {
         }
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[PLAYER_RULE_EVENT] depth=%s world=%s terrain=%s "
-               "source=local_player_stable_snapshot readOnly=yes",
+               "source=local_player_stable_snapshot state=sampled_for_next_spawn",
                terrain_depth_name(terrain.depth), world ? "yes" : "no",
                terrain_notice ? "yes" : "dedup_or_cooldown");
     }
@@ -527,11 +530,6 @@ static bool read_player_biome_probe(patch_handle_t getter,
 static bool capture_player_biome(OR_TerrainSnapshot *terrain,
                                  uint64_t tick,
                                  bool log_context) {
-    static OR_TerrainSnapshot cached = {
-        OR_DEPTH_SURFACE, OR_BIOME_FOREST, OR_SPECIAL_NONE
-    };
-    static uint64_t cached_tick;
-    static bool cache_valid;
     static patch_handle_t last_player;
     static patch_handle_t last_local_player;
     static patch_handle_t last_player_source;
@@ -575,11 +573,11 @@ static bool capture_player_biome(OR_TerrainSnapshot *terrain,
         !patchlib_method_invoke_args || !handle_valid(g_adapter.runtime->main_local_player_get)) {
         return false;
     }
-    if (cache_valid && tick >= cached_tick && tick - cached_tick < 45u) {
-        terrain->biome = cached.biome;
-        terrain->special = cached.special;
-        return true;
-    }
+    /* Re-read the local player on each committed spawn. The old 45-tick
+     * short-circuit made the dive target lag behind a moving player even
+     * though the terrain cache itself was valid. Biome getters are already
+     * exact zero-argument properties; keeping the position fresh here is
+     * cheaper and more useful than reusing a stale target. */
     local_player_ok = patchlib_method_invoke_args(
         g_adapter.runtime->main_local_player_get, PATCH_NULL, &player, NULL);
     if (g_adapter.runtime->main_player_field_probe && patchlib_array_at &&
@@ -626,6 +624,17 @@ static bool capture_player_biome(OR_TerrainSnapshot *terrain,
             g_adapter.runtime->player_position_field_probe, player,
             player_position_raw);
     }
+    if (player_position_ok) {
+        float player_x = 0.0f;
+        float player_y = 0.0f;
+        memcpy(&player_x, player_position_raw, sizeof(player_x));
+        memcpy(&player_y, player_position_raw + sizeof(player_x), sizeof(player_y));
+        if (isfinite(player_x) && isfinite(player_y)) {
+            g_adapter.last_player_position[0] = player_x;
+            g_adapter.last_player_position[1] = player_y;
+            g_adapter.last_player_position_valid = true;
+        }
+    }
     if (log_context || last_player_context_tick == 0u ||
         tick >= last_player_context_tick + 1800u) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -665,10 +674,6 @@ static bool capture_player_biome(OR_TerrainSnapshot *terrain,
     else if (snow) next.biome = OR_BIOME_SNOW;
     else if (desert) next.biome = OR_BIOME_DESERT;
     if (beach) next.special = OR_SPECIAL_OCEAN;
-    cached.biome = next.biome;
-    cached.special = next.special;
-    cached_tick = tick;
-    cache_valid = true;
     terrain->biome = next.biome;
     terrain->special = next.special;
     if (log_context || last_player != player ||
@@ -1448,6 +1453,7 @@ static void capture_world_context(patch_handle_t instance,
     bool day_time = true;
     bool blood_moon = false;
     bool raining = false;
+    bool sandstorm = false;
     bool eclipse = false;
     bool pumpkin_moon = false;
     bool snow_moon = false;
@@ -1455,9 +1461,11 @@ static void capture_world_context(patch_handle_t instance,
     double world_surface = 0.0;
     float top_world = 0.0f;
     float bottom_world = 0.0f;
+    float wind_strength = 0.0f;
     bool world_surface_ok = false;
     bool top_world_ok = false;
     bool bottom_world_ok = false;
+    bool wind_strength_ok = false;
     int32_t max_tiles_y = 0;
     bool max_tiles_y_ok = false;
     int32_t underworld_layer = 0;
@@ -1516,10 +1524,13 @@ static void capture_world_context(patch_handle_t instance,
     (void)read_bool(g_adapter.runtime->main_day_time, NULL, &day_time);
     (void)read_bool(g_adapter.runtime->main_blood_moon, NULL, &blood_moon);
     (void)read_bool(g_adapter.runtime->main_raining, NULL, &raining);
+    (void)read_bool(g_adapter.runtime->main_sandstorm, NULL, &sandstorm);
     (void)read_bool(g_adapter.runtime->main_eclipse, NULL, &eclipse);
     (void)read_bool(g_adapter.runtime->main_pumpkin_moon, NULL, &pumpkin_moon);
     (void)read_bool(g_adapter.runtime->main_snow_moon, NULL, &snow_moon);
     (void)read_bool(g_adapter.runtime->main_slime_rain, NULL, &slime_rain);
+    wind_strength_ok = read_float(g_adapter.runtime->main_wind_strength, NULL,
+                                  &wind_strength);
     world_surface_ok = read_double(g_adapter.runtime->main_world_surface, NULL,
                                    &world_surface);
     top_world_ok = read_float(g_adapter.runtime->main_top_world, NULL, &top_world);
@@ -1603,6 +1614,18 @@ static void capture_world_context(patch_handle_t instance,
         *weather = OR_WEATHER_BLOOD_MOON;
     } else if (eclipse) {
         *weather = OR_WEATHER_ECLIPSE;
+    } else if (pumpkin_moon) {
+        *weather = OR_WEATHER_PUMPKIN_MOON;
+    } else if (snow_moon) {
+        *weather = OR_WEATHER_SNOW_MOON;
+    } else if (slime_rain) {
+        *weather = OR_WEATHER_SLIME_RAIN;
+    } else if (sandstorm) {
+        *weather = OR_WEATHER_SANDSTORM;
+    } else if (raining && terrain && terrain->biome == OR_BIOME_SNOW) {
+        *weather = OR_WEATHER_BLIZZARD;
+    } else if (wind_strength_ok && fabsf(wind_strength) >= 0.45f) {
+        *weather = OR_WEATHER_WINDY;
     } else if (raining) {
         *weather = OR_WEATHER_RAIN;
     } else {
@@ -1611,12 +1634,15 @@ static void capture_world_context(patch_handle_t instance,
     if (log_context) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[WORLD_CONTEXT] dayTime=%s night=%s raining=%s bloodMoon=%s "
-               "eclipse=%s pumpkinMoon=%s snowMoon=%s slimeRain=%s weather=%s "
+               "eclipse=%s sandstorm=%s pumpkinMoon=%s snowMoon=%s slimeRain=%s "
+               "wind=%s:%.3f weather=%s "
                "terrain=%s/%s source=verified_main_fields",
                day_time ? "yes" : "no", day_time ? "no" : "yes",
                raining ? "yes" : "no", blood_moon ? "yes" : "no",
-               eclipse ? "yes" : "no", pumpkin_moon ? "yes" : "no",
-               snow_moon ? "yes" : "no", slime_rain ? "yes" : "no",
+               eclipse ? "yes" : "no", sandstorm ? "yes" : "no",
+               pumpkin_moon ? "yes" : "no", snow_moon ? "yes" : "no",
+               slime_rain ? "yes" : "no", wind_strength_ok ? "ok" : "unread",
+               (double)wind_strength,
                or_weather_name(*weather), terrain ? biome_name(terrain->biome) : "forest",
                terrain ? special_name(terrain->special) : "none");
         OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -2186,13 +2212,30 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[TERRAIN_EFFECT] type=%u depth=%s snapshot=committed "
            "lifeMultiplier=%.3f damageMultiplier=%.3f defenseMultiplier=%.3f "
-           "calamityWeight=%.3f apocalypseWeight=%.3f",
+           "calamityWeight=%.3f apocalypseWeight=%.3f movement=%.3f "
+           "aiIntensity=%.3f weather=%s night=%s element=%d",
            (unsigned)npc_type, terrain_depth_name(record->rules.terrain.depth),
            (double)record->rules.life_multiplier,
            (double)record->rules.damage_multiplier,
            (double)record->rules.defense_multiplier,
            (double)record->rules.tier_weight_multiplier[OR_TIER_CALAMITY],
-           (double)record->rules.tier_weight_multiplier[OR_TIER_APOCALYPSE]);
+           (double)record->rules.tier_weight_multiplier[OR_TIER_APOCALYPSE],
+           (double)record->rules.movement_multiplier,
+           (double)record->rules.ai_intensity,
+           or_weather_name(record->rules.weather),
+           record->rules.is_night ? "yes" : "no",
+           (int)record->rules.preferred_element);
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[WORLD_ENV_RULE_APPLY] type=%u selected=%u activeMask=0x%08x "
+           "terrain=%s/%s/%s weather=%s time=%s "
+           "effects=stats-tier-ai-loot-attack-context source=committed-snapshot",
+           (unsigned)npc_type, (unsigned)record->rules.selected_count,
+           (unsigned)record->rules.active_mask,
+           terrain_depth_name(record->rules.terrain.depth),
+           biome_name(record->rules.terrain.biome),
+           special_name(record->rules.terrain.special),
+           or_weather_name(record->rules.weather),
+           record->rules.is_night ? "night" : "day");
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[AI_PLAN_OBSERVE] type=%u tier=%s primary=%s finisher=%s "
            "hasLight=%s hasFinisher=%s fanShots=%u summons=%u "
@@ -2416,9 +2459,14 @@ static void reset_ai_factory_budget(void) {
     }
 }
 
-static int32_t ai_projectile_type(OR_AiTemplate template) {
+static int32_t ai_projectile_type(OR_AiTemplate template,
+                                  const OR_RuleSnapshot *rules) {
     /* These are the same vanilla projectile IDs used by EliteMonsters 1.3.2
      * and are only called through the exact ten-argument factory signature. */
+    if (rules && rules->preferred_element == OR_ELEMENT_FROST) return 27;
+    if (rules && (rules->preferred_element == OR_ELEMENT_TOXIC ||
+                  rules->preferred_element == OR_ELEMENT_CORRUPT ||
+                  rules->preferred_element == OR_ELEMENT_CRIMSON)) return 20;
     switch (template) {
         case OR_AI_TEMPLATE_FAN_SHOT: return 27;      /* IceBolt */
         case OR_AI_TEMPLATE_PHASE: return 20;         /* CursedFlame */
@@ -2448,7 +2496,7 @@ static bool spawn_ai_projectiles(patch_handle_t instance,
         g_adapter.ai_projectiles_this_tick >= 12u) return false;
     if (!read_vector2_field(g_adapter.runtime->field_position_probe, instance, position) ||
         !read_vector2_field(g_adapter.runtime->field_velocity_probe, instance, velocity)) return false;
-    projectile_type = ai_projectile_type(template);
+    projectile_type = ai_projectile_type(template, &record->rules);
     damage = record->final_stats.damage > 0 ? record->final_stats.damage / 3 : 8;
     if (damage < 1) damage = 1;
     if (damage > 2500) damage = 2500;
@@ -2589,6 +2637,53 @@ static void apply_phase_immunity(patch_handle_t instance,
     }
 }
 
+static bool record_is_flying(const OR_EliteRecord *record) {
+    bool known = false;
+    if (!record) return false;
+    return or_ai_classify_native_type(record->npc_type,
+                                      record->native_ai_style, &known) ==
+               OR_AI_ARCHETYPE_FLYING && known;
+}
+
+static void capture_flying_dive_target(OR_NativeBinding *binding,
+                                       const OR_EliteRecord *record,
+                                       uint32_t ai_tick) {
+    if (!binding || !record || !record_is_flying(record) ||
+        binding->ai_runtime.flying_dive_target_known) return;
+    if (!g_adapter.last_player_position_valid) {
+        static uint32_t unavailable_logs;
+        if (unavailable_logs < 8u) {
+            ++unavailable_logs;
+            OR_LOG(MOD_LOG_LEVEL_WARNING,
+                   "[AI_FLYING_DIVE_TARGET] type=%u target=unavailable "
+                   "reason=local_player_position_not_read tick=%u",
+                   (unsigned)record->npc_type, (unsigned)ai_tick);
+        }
+        return;
+    }
+    binding->ai_runtime.flying_dive_target_x = g_adapter.last_player_position[0];
+    binding->ai_runtime.flying_dive_target_y = g_adapter.last_player_position[1];
+    binding->ai_runtime.flying_dive_target_known = true;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[AI_FLYING_DIVE_TARGET] type=%u target=%.2f,%.2f "
+           "locked=current-player-position tick=%u",
+           (unsigned)record->npc_type,
+           (double)binding->ai_runtime.flying_dive_target_x,
+           (double)binding->ai_runtime.flying_dive_target_y,
+           (unsigned)ai_tick);
+}
+
+static void clear_flying_dive_target(OR_NativeBinding *binding,
+                                     const OR_EliteRecord *record,
+                                     uint32_t ai_tick) {
+    if (!binding || !record || !record_is_flying(record) ||
+        !binding->ai_runtime.flying_dive_target_known) return;
+    binding->ai_runtime.flying_dive_target_known = false;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[AI_FLYING_DIVE] type=%u state=finished target=cleared tick=%u",
+           (unsigned)record->npc_type, (unsigned)ai_tick);
+}
+
 static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
                              const OR_EliteRecord *record,
                              uint32_t npc_type, uint32_t ai_tick) {
@@ -2599,19 +2694,26 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
     float movement_multiplier;
     OR_AiTemplate template;
     bool rage_active;
+    bool flying;
+    float weather_multiplier = 1.0f;
+    unsigned char position_raw[8] = {0};
+    float position[2] = {0.0f, 0.0f};
     OR_AiRuntimeState *ai_runtime;
     if (!binding) return;
     ai_runtime = &binding->ai_runtime;
     if (!ORIGINREWRITE_ENABLE_SPECIAL_AI || !instance || !record ||
         !g_adapter.runtime || !g_adapter.runtime->field_velocity_probe ||
-        !ai_runtime || ai_runtime->phase != OR_AI_PHASE_ACTIVE ||
+        !ai_runtime || (ai_runtime->phase != OR_AI_PHASE_ACTIVE &&
+                         !(ai_runtime->phase == OR_AI_PHASE_TELEGRAPH &&
+                           record_is_flying(record))) ||
         (ai_tick % 6u) != 0u) return;
-    /* Only Active may affect movement. Telegraph, recovery and cooldown
-     * remain vanilla so the player gets a readable wind-up. */
+    /* Flying elites use Telegraph for air patrol and Active for the locked
+     * dive. Other archetypes only affect movement during Active. */
     template = record->ai_plan.has_finisher
         ? record->ai_plan.finisher : record->ai_plan.primary;
+    flying = record_is_flying(record);
     rage_active = template == OR_AI_TEMPLATE_RAGE && ai_runtime->rage_triggered;
-    if (template == OR_AI_TEMPLATE_RAGE && !rage_active) return;
+    if (template == OR_AI_TEMPLATE_RAGE && !rage_active && !flying) return;
     if (!read_vector2_field(g_adapter.runtime->field_velocity_probe, instance,
                            velocity)) return;
     direction = velocity[0] < -0.05f ? -1.0f : 1.0f;
@@ -2624,7 +2726,69 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
         ? record->rules.movement_multiplier : 1.0f;
     speed *= intensity * movement_multiplier;
     if (rage_active) speed *= 1.25f;
-    switch (template) {
+    if (record->rules.weather == OR_WEATHER_WINDY) weather_multiplier = 1.15f;
+    if (record->rules.weather == OR_WEATHER_SANDSTORM && flying) {
+        weather_multiplier = 1.10f;
+    }
+    speed *= weather_multiplier;
+    if (flying) {
+        if (ai_runtime->phase == OR_AI_PHASE_TELEGRAPH) {
+            float phase = ((float)ai_tick * 0.11f) +
+                          ((float)(npc_type % 17u) * 0.37f);
+            float patrol_speed = speed * 0.42f;
+            velocity[0] = cosf(phase) * patrol_speed;
+            velocity[1] = sinf(phase * 1.37f) * patrol_speed * 0.75f;
+            {
+                static uint32_t patrol_logs;
+                if (patrol_logs < 32u) {
+                    ++patrol_logs;
+                    OR_LOG(MOD_LOG_LEVEL_INFO,
+                           "[AI_FLYING_PATROL] type=%u state=air-random "
+                           "velocity=%.2f,%.2f tick=%u",
+                           (unsigned)npc_type, (double)velocity[0],
+                           (double)velocity[1], (unsigned)ai_tick);
+                }
+            }
+        } else if (ai_runtime->flying_dive_target_known &&
+                   read_position_raw(g_adapter.runtime->field_position_probe,
+                                     instance, position_raw)) {
+            float dx;
+            float dy;
+            float distance;
+            memcpy(&position[0], position_raw, sizeof(float));
+            memcpy(&position[1], position_raw + sizeof(float), sizeof(float));
+            dx = ai_runtime->flying_dive_target_x - position[0];
+            dy = ai_runtime->flying_dive_target_y - position[1];
+            distance = sqrtf(dx * dx + dy * dy);
+            if (isfinite(distance) && distance > 8.0f) {
+                float dive_speed = speed * 1.55f;
+                velocity[0] = (dx / distance) * dive_speed;
+                velocity[1] = (dy / distance) * dive_speed;
+            } else {
+                velocity[0] = 0.0f;
+                velocity[1] = speed * 0.25f;
+            }
+            {
+                static uint32_t dive_logs;
+                if (dive_logs < 64u) {
+                    ++dive_logs;
+                    OR_LOG(MOD_LOG_LEVEL_INFO,
+                           "[AI_FLYING_DIVE] type=%u state=diving "
+                           "target=%.2f,%.2f velocity=%.2f,%.2f tick=%u",
+                           (unsigned)npc_type,
+                           (double)ai_runtime->flying_dive_target_x,
+                           (double)ai_runtime->flying_dive_target_y,
+                           (double)velocity[0], (double)velocity[1],
+                           (unsigned)ai_tick);
+                }
+            }
+        } else {
+            float phase = ((float)ai_tick * 0.13f) +
+                          ((float)(npc_type % 23u) * 0.29f);
+            velocity[0] = cosf(phase) * speed * 0.38f;
+            velocity[1] = sinf(phase * 1.21f) * speed * 0.55f;
+        }
+    } else switch (template) {
         case OR_AI_TEMPLATE_LUNGE:
         case OR_AI_TEMPLATE_DASH:
             velocity[0] = direction * speed;
@@ -2799,6 +2963,17 @@ static void ai_postfix(
             (void)or_ai_tick(&record->ai_plan, &binding->ai_runtime,
                              (uint32_t)binding->ai_ticks);
             phase_after = binding->ai_runtime.phase;
+            if (record_is_flying(record)) {
+                if (phase_after == OR_AI_PHASE_ACTIVE &&
+                    phase_before != OR_AI_PHASE_ACTIVE) {
+                    capture_flying_dive_target(binding, record,
+                                               (uint32_t)binding->ai_ticks);
+                } else if (phase_before == OR_AI_PHASE_ACTIVE &&
+                           phase_after != OR_AI_PHASE_ACTIVE) {
+                    clear_flying_dive_target(binding, record,
+                                             (uint32_t)binding->ai_ticks);
+                }
+            }
             if (shadow_started || phase_before != phase_after) {
                 static uint32_t ai_shadow_log_samples;
                 if (ai_shadow_log_samples < 256u) {

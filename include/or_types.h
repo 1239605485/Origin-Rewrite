@@ -77,6 +77,10 @@ typedef enum OR_Weather {
     OR_WEATHER_BLIZZARD,
     OR_WEATHER_ECLIPSE,
     OR_WEATHER_BLOOD_MOON,
+    OR_WEATHER_PUMPKIN_MOON,
+    OR_WEATHER_SNOW_MOON,
+    OR_WEATHER_SLIME_RAIN,
+    OR_WEATHER_WINDY,
     OR_WEATHER_COUNT
 } OR_Weather;
 
@@ -281,6 +285,9 @@ typedef struct OR_AiRuntimeState {
     uint32_t cooldown_until_tick;
     OR_AiPhase phase;
     bool rage_triggered;
+    bool flying_dive_target_known;
+    float flying_dive_target_x;
+    float flying_dive_target_y;
 } OR_AiRuntimeState;
 
 typedef struct OR_InstanceKey {
