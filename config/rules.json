@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "worldRuleCount": {"min": 2, "max": 4},
+  "deterministicByWorldSeed": true,
+  "rules": [
+    "reconstruction_tide",
+    "strong_world",
+    "harvest_contract",
+    "storm_border",
+    "night_law",
+    "abyss_echo",
+    "evil_infection",
+    "glass_cannon",
+    "undead_echo",
+    "treasure_lure",
+    "moon_hunt",
+    "adversity_reward"
+  ],
+  "conflicts": [
+    ["strong_world", "glass_cannon"],
+    ["reconstruction_tide", "adversity_reward"],
+    ["harvest_contract", "treasure_lure"]
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "patchlibProbeUnavailable": "disable-unverified-runtime-capability",
+  "spawnLifecycleUnavailable": "disable-rewrite-rolls",
+  "worldContextUnavailable": "use-conservative-pre-hardmode-and-forest-snapshot",
+  "specialAiUnavailable": "retain-vanilla-ai-and-stat-overlay",
+  "lootApiUnavailable": "preserve-vanilla-loot-and-final-NPC.value-only",
+  "broadcastUnavailable": "log-only",
+  "colorUnavailable": "name-prefix-only",
+  "networkUnavailable": "host-authoritative-decisions-no-client-side-roll"
+}

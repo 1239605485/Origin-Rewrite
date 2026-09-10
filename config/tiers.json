@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "compiledBalanceReference": true,
+  "tiers": {
+    "altered": {
+      "displayName": "异化体",
+      "color": "#49C96D",
+      "defenseMultiplier": 1.10,
+      "moneyMultiplier": 1.50,
+      "knockbackReduction": 0.20,
+      "scaleMultiplier": 1.05,
+      "slotMultiplier": 1.15,
+      "aiIntensity": 1.00
+    },
+    "calamity": {
+      "displayName": "灾变体",
+      "color": "#4287F5",
+      "defenseMultiplier": 1.20,
+      "moneyMultiplier": 3.00,
+      "knockbackReduction": 0.40,
+      "scaleMultiplier": 1.10,
+      "slotMultiplier": 1.35,
+      "aiIntensity": 1.15
+    },
+    "apocalypse": {
+      "displayName": "终焉体",
+      "color": "#C04CFF",
+      "defenseMultiplier": 1.30,
+      "moneyMultiplier": 6.00,
+      "knockbackReduction": 0.60,
+      "scaleMultiplier": 1.15,
+      "slotMultiplier": 1.75,
+      "aiIntensity": 1.30
+    }
+  }
+}

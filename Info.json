@@ -1,0 +1,31 @@
+{
+  "pkgId": "li06.originrewrite",
+  "name": "OriginRewrite_起源重构（PatchLib 架构版）",
+  "author": "liuxin",
+  "version": "1.0.25-github-actions-arm64",
+  "versionCode": 2026091025,
+  "brieflyDescribe": "OriginRewrite Android ARM64：TEFKernel PatchLib + 纯 C 规则核心",
+  "description": "起源重构 v1.0：三档重构体、世界规则、地形规则和原版掉落策略；不使用 BNM，仅支持单机。",
+  "features": [
+    "MECHANICS_CHANGE",
+    "DIFFICULTY_MOD",
+    "PROGRESSION_SYSTEM"
+  ],
+  "sizeCategory": "TINY",
+  "targetGameVersion": "1.4.5.8.5",
+  "minGameVersion": "1.4.4.0",
+  "maxGameVersion": "1.4.5.8.5",
+  "support": {
+    "android": { "arm64": true, "arm": false, "x64": false, "x86": false },
+    "windows": { "arm64": false, "arm": false, "x64": false, "x86": false },
+    "linux": { "arm64": false, "arm": false, "x64": false, "x86": false },
+    "mac": { "arm64": false, "arm": false, "x64": false, "x86": false },
+    "ios": { "arm64": false, "arm": false, "x64": false, "x86": false }
+  },
+  "dependence": [],
+  "conflicts": [],
+  "stableVerified": false,
+  "experimental": true,
+  "deprecated": false,
+  "hasExtendedContent": true
+}

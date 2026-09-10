@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "targetGameVersion": "1.4.5.8.5",
+  "minimumGameVersion": "1.4.4.0",
+  "platform": "android-arm64-v8a",
+  "minimumAndroidApi": 24,
+  "hooks": "TEFKernel-PatchLib",
+  "metadata": "PatchLib-only"
+}

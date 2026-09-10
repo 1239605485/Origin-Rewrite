@@ -1,0 +1,398 @@
+#include "or_broadcast.h"
+#include "or_config.h"
+#include "or_rules.h"
+
+#include "or_log.h"
+#include "tefkernel/patchlib/method.h"
+#include "tefkernel/patchlib/struct/string.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#define OR_LOG(level, ...) do { or_log_write((level), __VA_ARGS__); } while (0)
+
+static const char *terrain_depth_name(OR_DepthTag depth) {
+    static const char *const names[] = {"地表", "地下", "洞穴", "地狱"};
+    return depth < OR_DEPTH_COUNT ? names[depth] : "地表";
+}
+
+static const char *terrain_biome_name(OR_BiomeTag biome) {
+    static const char *const names[] = {"森林", "沙漠", "雪原", "丛林", "神圣", "腐化", "猩红"};
+    return biome < OR_BIOME_COUNT ? names[biome] : "森林";
+}
+
+static const char *terrain_special_name(OR_SpecialLocationTag special) {
+    static const char *const names[] = {"", "海洋", "地牢", "发光蘑菇洞", "天空"};
+    return special < OR_SPECIAL_COUNT ? names[special] : "";
+}
+
+static const char *tier_prefix(OR_EliteTier tier) {
+    switch (tier) {
+    case OR_TIER_APOCALYPSE: return "终焉体";
+    case OR_TIER_CALAMITY: return "灾变体";
+    case OR_TIER_ALTERED: return "异化体";
+    default: return NULL;
+    }
+}
+
+static void tier_rgba(OR_EliteTier tier, uint8_t rgba[4]) {
+    uint32_t packed;
+    switch (tier) {
+    case OR_TIER_ALTERED: packed = 0xFF8FFFA8u; break; /* mint */
+    case OR_TIER_CALAMITY: packed = 0xFF80C7FFu; break; /* sky */
+    case OR_TIER_APOCALYPSE: packed = 0xFFF0A0FFu; break; /* lilac */
+    default: packed = 0xFFFFFFFFu; break;
+    }
+    rgba[0] = (uint8_t)((packed >> 16) & 0xFFu);
+    rgba[1] = (uint8_t)((packed >> 8) & 0xFFu);
+    rgba[2] = (uint8_t)(packed & 0xFFu);
+    rgba[3] = (uint8_t)((packed >> 24) & 0xFFu);
+}
+
+void or_broadcast_init(OR_BroadcastState *state) {
+    if (state) {
+        memset(state, 0, sizeof(*state));
+        state->next_message_id = 1u;
+    }
+}
+
+static uint32_t next_message_id(const OR_BroadcastState *state) {
+    return state && state->next_message_id != 0u ? state->next_message_id : 1u;
+}
+
+static void commit_message_id(OR_BroadcastState *state, uint32_t message_id) {
+    uint32_t next;
+    if (!state) return;
+    state->last_message_id = message_id;
+    next = message_id + 1u;
+    state->next_message_id = next == 0u ? 1u : next;
+}
+
+bool or_broadcast_emit_elite(OR_BroadcastState *state,
+                             const OR_Runtime *runtime,
+                             OR_EliteTier tier,
+                             uint32_t npc_type,
+                             uint64_t generation_id,
+                             uint64_t snapshot_revision,
+                             uint64_t now_tick) {
+    char message[192];
+    patch_handle_t message_handle;
+    uint32_t message_id;
+    uint64_t ignored_return = 0u;
+    void *args[4] = {NULL, NULL, NULL, NULL};
+    bool force_display = true;
+    uint8_t rgba[4];
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    void *color_pointer_storage;
+    int32_t red_i;
+    int32_t green_i;
+    int32_t blue_i;
+    const char *prefix;
+
+    if (!state || !runtime || tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE) return false;
+    message_id = next_message_id(state);
+    prefix = tier_prefix(tier);
+    tier_rgba(tier, rgba);
+    red = rgba[0];
+    green = rgba[1];
+    blue = rgba[2];
+    color_pointer_storage = rgba;
+    red_i = red;
+    green_i = green;
+    blue_i = blue;
+    if (!prefix || !runtime->capabilities.new_text_ready ||
+        (runtime->main_new_text_arg_count != 1 &&
+         runtime->main_new_text_arg_count != 3 &&
+         runtime->main_new_text_arg_count != 4) ||
+        !runtime->method_main_new_text || !patchlib_string_create ||
+        !patchlib_method_invoke_args) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=api_unavailable",
+               (unsigned)message_id, (unsigned)npc_type);
+        return false;
+    }
+    if (generation_id != 0u && state->last_generation_id == generation_id &&
+        state->last_elite_tier == (uint32_t)tier) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[BROADCAST_DEDUP] messageId=%u generation=%llu",
+               (unsigned)message_id, (unsigned long long)generation_id);
+        return false;
+    }
+    if (state->last_emit_tick != 0u && now_tick < state->last_emit_tick + 120u) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[BROADCAST_COOLDOWN] messageId=%u generation=%llu",
+               (unsigned)message_id, (unsigned long long)generation_id);
+        return false;
+    }
+    if (snprintf(message, sizeof(message),
+                 tier == OR_TIER_ALTERED
+                     ? "【异化体警报】世界规则发生偏移，异化体已现身。"
+                     : (tier == OR_TIER_CALAMITY
+                         ? "【灾变体警报】世界规则发生偏移，灾变体已从裂缝中现身。"
+                         : "【终焉体警报】重写波动越过边界，终焉体已降临。")) >=
+        (int)sizeof(message)) return false;
+    message_handle = patchlib_string_create(message);
+    if (!message_handle) return false;
+    args[0] = &message_handle;
+    if (runtime->main_new_text_arg_count == 3) {
+        if (runtime->main_new_text_color_type != PATCH_POINTER) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=color_pointer_abi_unknown",
+                   (unsigned)message_id, (unsigned)npc_type);
+            return false;
+        }
+        /* PATCH_POINTER is the native pointer slot for the managed Color
+         * valuetype. The invoke API expects args[index] to point at that slot. */
+        args[1] = &color_pointer_storage;
+        args[2] = &force_display;
+    } else if (runtime->main_new_text_arg_count == 4) {
+        if (runtime->main_new_text_color_type == PATCH_UINT8) {
+            args[1] = &red;
+            args[2] = &green;
+            args[3] = &blue;
+        } else if (runtime->main_new_text_color_type == PATCH_INT32) {
+            args[1] = &red_i;
+            args[2] = &green_i;
+            args[3] = &blue_i;
+        } else {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=color_abi_unknown",
+                   (unsigned)message_id, (unsigned)npc_type);
+            return false;
+        }
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[BROADCAST_COLOR] messageId=%u rgba=%u,%u,%u,%u",
+           (unsigned)message_id, (unsigned)rgba[0], (unsigned)rgba[1],
+           (unsigned)rgba[2], (unsigned)rgba[3]);
+    if (!patchlib_method_invoke_args(runtime->method_main_new_text,
+                                     PATCH_NULL, &ignored_return, args)) {
+        OR_LOG(MOD_LOG_LEVEL_WARNING,
+               "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=invoke_failed",
+               (unsigned)message_id, (unsigned)npc_type);
+        return false;
+    }
+    commit_message_id(state, message_id);
+    state->last_elite_tier = (uint32_t)tier;
+    state->last_generation_id = generation_id;
+    state->last_emit_tick = now_tick;
+    state->snapshot_revision = snapshot_revision;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[BROADCAST_COMMIT] messageId=%u channel=elite_spawn scope=local_host "
+           "type=%u generation=%llu snapshotRevision=%llu",
+           (unsigned)message_id, (unsigned)npc_type,
+           (unsigned long long)generation_id,
+           (unsigned long long)snapshot_revision);
+    return true;
+}
+
+bool or_broadcast_emit_terrain(OR_BroadcastState *state,
+                               const OR_Runtime *runtime,
+                               OR_TerrainSnapshot terrain,
+                               uint64_t snapshot_revision,
+                               uint64_t now_tick) {
+    char message[192];
+    patch_handle_t string_handle;
+    uint64_t ignored_return = 0u;
+    void *args[4] = {NULL, NULL, NULL, NULL};
+    uint8_t rgba[4] = {138u, 231u, 255u, 255u}; /* terrain: bright cyan */
+    void *color_slot = NULL;
+    bool force_display = true;
+    uint32_t key = ((uint32_t)terrain.depth << 16) |
+                   ((uint32_t)terrain.biome << 8) | (uint32_t)terrain.special;
+    const char *special = terrain_special_name(terrain.special);
+    int count;
+    if (!state || !runtime || !runtime->capabilities.new_text_ready ||
+        !runtime->method_main_new_text || !patchlib_string_create ||
+        !patchlib_method_invoke_args || terrain.depth >= OR_DEPTH_COUNT ||
+        terrain.biome >= OR_BIOME_COUNT || terrain.special >= OR_SPECIAL_COUNT) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[TERRAIN_BROADCAST_SKIP] reason=api_or_snapshot_unavailable");
+        return false;
+    }
+    if (state->last_terrain_key == key && state->last_terrain_tick != 0u) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[TERRAIN_BROADCAST_SKIP] reason=duplicate key=%u", (unsigned)key);
+        return false;
+    }
+    if (state->last_terrain_tick != 0u && now_tick < state->last_terrain_tick + 600u) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[TERRAIN_BROADCAST_SKIP] reason=cooldown key=%u", (unsigned)key);
+        return false;
+    }
+    count = snprintf(message, sizeof(message), "起源回响：%s·%s%s",
+                     terrain_depth_name(terrain.depth), terrain_biome_name(terrain.biome),
+                     special[0] != '\0' ? special : "");
+    if (count < 0 || count >= (int)sizeof(message)) return false;
+    string_handle = patchlib_string_create(message);
+    if (!string_handle) return false;
+    args[0] = &string_handle;
+    if (runtime->main_new_text_arg_count == 3 && runtime->main_new_text_color_type == PATCH_POINTER) {
+        color_slot = rgba;
+        args[1] = &color_slot;
+        args[2] = &force_display;
+    } else if (runtime->main_new_text_arg_count != 1) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[TERRAIN_BROADCAST_SKIP] reason=notice_signature argCount=%d colorType=%d",
+               runtime->main_new_text_arg_count, (int)runtime->main_new_text_color_type);
+        return false;
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[BROADCAST_COLOR] channel=terrain rgba=%u,%u,%u,%u",
+           (unsigned)rgba[0], (unsigned)rgba[1], (unsigned)rgba[2],
+           (unsigned)rgba[3]);
+    if (!patchlib_method_invoke_args(runtime->method_main_new_text, PATCH_NULL,
+                                     &ignored_return, args)) {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[TERRAIN_BROADCAST_SKIP] reason=invoke_failed key=%u", (unsigned)key);
+        return false;
+    }
+    state->last_terrain_key = key;
+    state->last_terrain_tick = now_tick;
+    state->snapshot_revision = snapshot_revision;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[TERRAIN_BROADCAST_COMMIT] depth=%s biome=%s special=%s revision=%llu",
+           terrain_depth_name(terrain.depth), terrain_biome_name(terrain.biome),
+           special[0] != '\0' ? special : "none",
+           (unsigned long long)snapshot_revision);
+    return true;
+}
+
+bool or_broadcast_emit_world(OR_BroadcastState *state,
+                             const OR_Runtime *runtime,
+                             OR_Weather weather,
+                             bool is_night,
+                             uint64_t snapshot_revision,
+                             uint64_t now_tick) {
+    char message[160];
+    patch_handle_t string_handle;
+    uint64_t ignored_return = 0u;
+    void *args[4] = {NULL, NULL, NULL, NULL};
+    uint8_t rgba[4] = {255u, 196u, 119u, 255u}; /* weather: soft amber */
+    void *color_slot = NULL;
+    bool force_display = true;
+    uint32_t key = ((uint32_t)weather << 1) | (is_night ? 1u : 0u);
+    const char *weather_name;
+    int count;
+    if (!state || !runtime || !runtime->capabilities.new_text_ready ||
+        !runtime->method_main_new_text || !patchlib_string_create ||
+        !patchlib_method_invoke_args || weather >= OR_WEATHER_COUNT) {
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=api_or_snapshot_unavailable");
+        return false;
+    }
+    if (state->last_world_key == key && state->last_world_tick != 0u) {
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=duplicate key=%u", (unsigned)key);
+        return false;
+    }
+    if (state->last_world_tick != 0u && now_tick < state->last_world_tick + 120u) {
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=cooldown key=%u", (unsigned)key);
+        return false;
+    }
+    weather_name = or_weather_name(weather);
+    count = snprintf(message, sizeof(message), "起源律动：%s·%s",
+                     is_night ? "夜晚" : "白昼", weather_name);
+    if (count < 0 || count >= (int)sizeof(message)) return false;
+    string_handle = patchlib_string_create(message);
+    if (!string_handle) return false;
+    args[0] = &string_handle;
+    if (runtime->main_new_text_arg_count == 3 && runtime->main_new_text_color_type == PATCH_POINTER) {
+        color_slot = rgba;
+        args[1] = &color_slot;
+        args[2] = &force_display;
+    } else if (runtime->main_new_text_arg_count != 1) {
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=notice_signature");
+        return false;
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[BROADCAST_COLOR] channel=weather rgba=%u,%u,%u,%u",
+           (unsigned)rgba[0], (unsigned)rgba[1], (unsigned)rgba[2],
+           (unsigned)rgba[3]);
+    if (!patchlib_method_invoke_args(runtime->method_main_new_text, PATCH_NULL,
+                                     &ignored_return, args)) {
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=invoke_failed key=%u", (unsigned)key);
+        return false;
+    }
+    state->last_world_key = key;
+    state->last_world_tick = now_tick;
+    state->snapshot_revision = snapshot_revision;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[WORLD_BROADCAST_COMMIT] night=%s weather=%s key=%u revision=%llu",
+           is_night ? "yes" : "no", weather_name, (unsigned)key,
+           (unsigned long long)snapshot_revision);
+    return true;
+}
+
+bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
+                                    const OR_Runtime *runtime,
+                                    const OR_RuleSnapshot *snapshot,
+                                    uint64_t now_tick) {
+    (void)now_tick;
+    char message[256];
+    patch_handle_t text;
+    uint64_t ignored = 0u;
+    void *args[4] = {NULL, NULL, NULL, NULL};
+    bool force = true;
+    void *color_slot = NULL;
+    uint8_t rgba[4] = {255u, 224u, 138u, 255u}; /* world rules: pale gold */
+    size_t i;
+    int used;
+    if (!state || !runtime || !snapshot || !snapshot->selected_count ||
+        !runtime->capabilities.new_text_ready || !runtime->method_main_new_text ||
+        !patchlib_string_create || !patchlib_method_invoke_args) return false;
+    {
+        uint64_t key = ((uint64_t)snapshot->active_mask << 32) |
+                       (uint64_t)snapshot->progress;
+        if (state->last_rule_summary_key == key) return false;
+    }
+    used = snprintf(message, sizeof(message), "起源规则：%s；倍率 生命%.2f 伤害%.2f 防御%.2f",
+                    or_progress_stage_name(snapshot->progress),
+                    (double)snapshot->life_multiplier,
+                    (double)snapshot->damage_multiplier,
+                    (double)snapshot->defense_multiplier);
+    if (used < 0 || used >= (int)sizeof(message)) return false;
+    for (i = 0u; i < snapshot->selected_count && i < OR_MAX_WORLD_RULES; ++i) {
+        size_t len = strlen(message);
+        int n = snprintf(message + len, sizeof(message) - len, "%s%s",
+                         i == 0u ? "(" : ",", or_world_rule_name(snapshot->selected_ids[i]));
+        if (n < 0 || (size_t)n >= sizeof(message) - len) return false;
+    }
+    if (snapshot->selected_count < OR_MAX_WORLD_RULES) {
+        size_t len = strlen(message);
+        if (len + 2u >= sizeof(message)) return false;
+        message[len] = ')'; message[len + 1u] = '\0';
+    }
+    text = patchlib_string_create(message); if (!text) return false;
+    args[0] = &text;
+    if (runtime->main_new_text_arg_count == 3 && runtime->main_new_text_color_type == PATCH_POINTER) {
+        color_slot = rgba;
+        args[1] = &color_slot; args[2] = &force;
+    } else if (runtime->main_new_text_arg_count != 1) return false;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[BROADCAST_COLOR] channel=world_rule rgba=%u,%u,%u,%u",
+           (unsigned)rgba[0], (unsigned)rgba[1], (unsigned)rgba[2],
+           (unsigned)rgba[3]);
+    if (!patchlib_method_invoke_args(runtime->method_main_new_text, PATCH_NULL, &ignored, args)) return false;
+    state->last_rule_summary_key = ((uint64_t)snapshot->active_mask << 32) |
+                                   (uint64_t)snapshot->progress;
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[RULE_SUMMARY_BROADCAST] stage=%s rules=%u", or_progress_stage_name(snapshot->progress), (unsigned)snapshot->selected_count);
+    return true;
+}
+
+bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *runtime,
+                                   uint32_t npc_type, OR_BossDialogEvent event, uint64_t now_tick) {
+    char message[160]; patch_handle_t text; uint64_t ignored=0; void *args[4]={NULL}; bool force=true;
+    uint8_t rgba[4]={255u,156u,168u,255u}; void *color_slot=NULL;
+    if (!state || !runtime || !runtime->capabilities.new_text_ready ||
+        (runtime->main_new_text_arg_count != 1 && runtime->main_new_text_arg_count != 3) || !patchlib_string_create || !patchlib_method_invoke_args) return false;
+    if (state->last_emit_tick && now_tick < state->last_emit_tick + 120u) return false;
+    if (event != OR_BOSS_DIALOG_SPAWN && event != OR_BOSS_DIALOG_HALF && event != OR_BOSS_DIALOG_DEATH) return false;
+    snprintf(message,sizeof(message), event == OR_BOSS_DIALOG_HALF ? "【首领回响】目标 #%u 的防线正在瓦解。" : (event == OR_BOSS_DIALOG_DEATH ? "【首领回响】目标 #%u 的回响已归于寂静。" : "【首领回响】目标 #%u 已被起源律动锁定。"), (unsigned)npc_type);
+    text=patchlib_string_create(message); if (!text) return false; args[0]=&text;
+    if (runtime->main_new_text_arg_count == 3) { if (runtime->main_new_text_color_type != PATCH_POINTER) return false; color_slot=rgba; args[1]=&color_slot; args[2]=&force; }
+    OR_LOG(MOD_LOG_LEVEL_INFO,"[BROADCAST_COLOR] channel=boss rgba=%u,%u,%u,%u",
+           (unsigned)rgba[0],(unsigned)rgba[1],(unsigned)rgba[2],(unsigned)rgba[3]);
+    if (!patchlib_method_invoke_args(runtime->method_main_new_text,PATCH_NULL,&ignored,args)) return false;
+    state->last_emit_tick=now_tick; OR_LOG(MOD_LOG_LEVEL_INFO,"[BOSS_DIALOG] type=%u event=%s",(unsigned)npc_type,event == OR_BOSS_DIALOG_HALF ? "half" : (event == OR_BOSS_DIALOG_DEATH ? "death" : "spawn")); return true;
+}

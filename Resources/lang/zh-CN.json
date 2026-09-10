@@ -1,0 +1,9 @@
+{
+  "tier.altered": "异化体",
+  "tier.calamity": "灾变体",
+  "tier.apocalypse": "终焉体",
+  "notice.world": "[精英规则] 当前世界规则：",
+  "notice.terrain": "[地形规则] 当前区域：{terrain}",
+  "notice.weather": "[天气规则] 当前天气：{weather}",
+  "warning.safeOff": "部分接口不兼容，相关功能已安全关闭"
+}

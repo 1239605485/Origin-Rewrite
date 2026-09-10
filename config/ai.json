@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "stateMachine": ["ready", "telegraph", "active", "recovery", "cooldown"],
+  "maxSummons": 2,
+  "maxFanShots": 5,
+  "rageThreshold": 0.25,
+  "archetypes": ["melee", "ranged", "flying", "worm", "swarm", "special"],
+  "unknownAiStyleFallback": "melee",
+  "nativeExecution": "disabled-until-target-abi-verified"
+}

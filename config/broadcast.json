@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "worldSummary": true,
+  "terrainNotices": true,
+  "weatherNotices": true,
+  "cooldownTicks": 120,
+  "calamityRangeTiles": 120,
+  "apocalypseScope": "global",
+  "decisionPayloadsForbidden": true
+}
