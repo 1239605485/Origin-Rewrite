@@ -20,7 +20,7 @@ bash scripts/package_android_arm64.sh
 ## 安装包布局
 
 ```text
-OriginRewrite-v1.0.27-name-broadcast-color-fix-arm64.zip
+OriginRewrite-v1.0.31-v06-name-color-render-fix-arm64.zip
 ├── Manifest.json
 ├── Info.json
 ├── OriginRewrite.json

@@ -2652,14 +2652,31 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
     OR_EliteTier matched_tier;
     static uint32_t seen_count;
     static uint32_t applied_count;
+    static uint32_t call_count;
+    size_t rarity_index = 1u;
     (void)instance;
-    (void)sig_info;
     (void)result;
-    if (!args || !args[0] || !args[1] || !patchlib_string_cstr) return true;
+    /* Match EliteMonsters' working MouseText hook: the prefix callback must
+     * return the hook library's "continue with the original method" value.
+     * On this TEF build that value is false. Returning true here allowed the
+     * hook to install successfully but prevented the original text renderer
+     * from consuming the rewritten rarity in the expected path. */
+    if (!args || !args[0] || !patchlib_string_cstr) return false;
+    if (sig_info && tefstd_vector_size(&sig_info->arg_types) >= 10u) {
+        rarity_index = 2u;
+    }
+    if (!args[rarity_index]) return false;
     memcpy(&text_handle, args[0], sizeof(text_handle));
-    if (!text_handle) return true;
+    if (!text_handle) return false;
     text = patchlib_string_cstr(text_handle);
-    if (!text) return true;
+    if (!text) return false;
+    if (call_count < 32u) {
+        ++call_count;
+        OR_LOG(MOD_LOG_LEVEL_DEBUG,
+               "[NAME_COLOR_CALL] argCount=%zu name=%s",
+               sig_info ? tefstd_vector_size(&sig_info->arg_types) : 0u,
+               text);
+    }
     matched_tier = remembered_name_tier(text);
     /* FullName on this build may prepend the vanilla type name, so the
      * rewrite marker is not guaranteed to be at offset zero. */
@@ -2679,10 +2696,10 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
                    "[NAME_COLOR_SEEN] matched=no name=%s", text);
         }
         free(text);
-        return true;
+        return false;
     }
-    memcpy(&rarity, args[1], sizeof(rarity));
-    memcpy(args[1], &replacement, sizeof(replacement));
+    memcpy(&rarity, args[rarity_index], sizeof(rarity));
+    memcpy(args[rarity_index], &replacement, sizeof(replacement));
     if (applied_count < 32u) {
         ++applied_count;
         OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -2690,7 +2707,7 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
                tier, (int)replacement, (int)rarity, text);
     }
     free(text);
-    return true;
+    return false;
 }
 
 bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *state) {
