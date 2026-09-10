@@ -30,23 +30,22 @@ Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决
 - `Resources/config/general.json` 的开关、概率、活动上限和冷却会从 KernelLoader
   私有目录读取，非法值由统一验证器限幅。
 
-未经目标手机完整 ABI/顺序验证的特殊 AI 投射物/召唤/无敌动作、颜色写入、额外物品生成、世界
-存档写入与客户端同步不会伪装成已完成；已验证的速度行为会按 AI 阶段执行，其余保留核心策略、状态和能力探测，并按
-[`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) 中的状态安全关闭。
+怪物 AI 已按 v0.6 开放近战、远程、飞行、蠕虫和特殊体的完整动作层：原版 AI 先执行，
+再按五阶段叠加位移、原生投射物、召唤、相位免伤和狂暴。投射物/召唤/免伤动作分别使用
+运行时精确探测到的目标成员；目标版本缺少某个成员时，仅该动作回退为原版，不影响其他 AI。
 
 ## 参考模组迁移开关
 
 本版本吸收了 EliteMonsters 的几个可靠做法：在 `NPCLoot` 后缀作为死亡边界、主机/单机
 权限判断、每个实例只结算一次、`Item.NewItem` 返回槽位的回读验证，以及失败时保留原版
-掉落。对应的原生额外物品测试默认关闭：`Resources/config/general.json` 中的
-`enableNativeExtraLoot` 必须在目标版本确认 `NewItem` 九参数 ABI、`ItemID` 和物品槽位
-回读都正常后才可手动打开；打开后也只测试一个 Gel，不会直接启用完整掉落池。
+掉落。原生额外物品当前允许调用，但只有 `NewItem` 返回槽位的物品类型和堆叠回读同时
+匹配时才会标记奖励已结算；回读失败时保留原版掉落且不伪造额外奖励成功。
 
 名称颜色使用 `GivenOrTypeName`/`FullName` 实际显示路径登记名称，再在目标
 `Main.MouseText` 的已验证签名中映射到原版稀有度色板；同时保留原名和带前缀名称，兼容
 不同移动版渲染器传入的文本形式。播报文本还带有 Terraria 原生 `[c/色值:文本]` 标记，
 避免部分版本忽略 `Color` 结构体参数时所有播报变成同一种颜色。NPC 身体 `color` 写入和
-特殊 AI 已开放经过验证的阶段性位移；投射物、召唤和无敌动作仍由能力门控，不能把元数据探测当作这些动作已完成。
+特殊 AI 已开放位移、投射物、召唤和相位免伤动作，并在启动日志输出各工厂的解析结果。
 
 播报颜色已按灾变体、终焉体、天气、地形、世界规则和 Boss 分组为显眼淡色，并会在日志
 中输出 `[BROADCAST_COLOR]` 方便真机核对。GitHub Actions 工作流位于
@@ -69,7 +68,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
 bash scripts/package_android_arm64.sh
 ```
 
-产物 `OriginRewrite-v1.0.33-v06-ai-archetype-phase-arm64.zip` 可直接导入
+产物 `OriginRewrite-v1.0.34-v06-ai-full-actions-arm64.zip` 可直接导入
 TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
 [`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 

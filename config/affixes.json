@@ -4,7 +4,9 @@
   "altered": ["swift", "tenacious", "berserk", "leech"],
   "calamity": ["charge", "shield", "longshot", "frost-or-heat"],
   "apocalypse": ["summon", "phase", "hell-barrage", "doomsday-rage"],
-  "nativeExecution": "phase-gated-verified-velocity",
-  "unverifiedActions": ["projectile", "summon", "invulnerability"],
-  "fallback": "original-ai-first-and-preserved"
+  "nativeExecution": "full-archetype-actions",
+  "projectile": "fan-or-burst-native-spawn",
+  "summon": "bounded-same-type-native-spawn-max-2",
+  "phase": "active-window-native-immunity",
+  "fallback": "original-ai-first-and-preserved-only-when-target-member-is-absent"
 }

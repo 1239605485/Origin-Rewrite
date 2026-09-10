@@ -2202,6 +2202,70 @@ static void or_resolve_strike_method(OR_Runtime *runtime) {
     }
 }
 
+static void or_resolve_ai_factories(OR_Runtime *runtime) {
+    static const patch_type_t npc_args4[] = {
+        PATCH_INT32, PATCH_INT32, PATCH_INT32, PATCH_INT32
+    };
+    static const patch_type_t npc_args10[] = {
+        PATCH_INT32, PATCH_INT32, PATCH_INT32, PATCH_INT32,
+        PATCH_FLOAT, PATCH_FLOAT, PATCH_FLOAT, PATCH_FLOAT,
+        PATCH_FLOAT, PATCH_FLOAT
+    };
+    static const patch_type_t projectile_args[] = {
+        PATCH_FLOAT, PATCH_FLOAT, PATCH_FLOAT, PATCH_FLOAT,
+        PATCH_INT32, PATCH_INT32, PATCH_FLOAT, PATCH_INT32,
+        PATCH_FLOAT, PATCH_FLOAT
+    };
+    patch_handle_t method = PATCH_NULL;
+    patch_handle_t projectile_type = PATCH_NULL;
+    size_t i;
+
+    if (!runtime || !patchlib_type_get_method_by_param_count) return;
+
+    /* Terraria exposes both the compact and extended NPC.NewNPC overloads.
+     * Resolve only exact static signatures; the returned handle is later
+     * used by the host-authoritative summon action. */
+    for (i = 0u; i < 2u; ++i) {
+        int arg_count = i == 0u ? 4 : 10;
+        const patch_type_t *expected = i == 0u ? npc_args4 : npc_args10;
+        method = patchlib_type_get_method_by_param_count(
+            runtime->npc_type, "NewNPC", (size_t)arg_count);
+        if (or_runtime_signature_matches(method, false, PATCH_INT32,
+                                         expected, (size_t)arg_count)) {
+            runtime->method_npc_new_npc = method;
+            runtime->npc_new_npc_arg_count = arg_count;
+            runtime->npc_new_npc_signature_ready = true;
+            runtime->capabilities.npc_spawn_factory_ready = true;
+            OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                           "[AI_FACTORY] NPC.NewNPC ready=yes args=%d "
+                           "authority=host-or-singleplayer",
+                           arg_count);
+            break;
+        }
+        or_release_handle(method);
+        method = PATCH_NULL;
+    }
+
+    projectile_type = patchlib_type_get_type
+        ? patchlib_type_get_type("Terraria", "Projectile") : PATCH_NULL;
+    if (projectile_type && patchlib_type_get_method_by_param_count) {
+        method = patchlib_type_get_method_by_param_count(
+            projectile_type, "NewProjectile", 10u);
+        if (or_runtime_signature_matches(method, false, PATCH_INT32,
+                                         projectile_args, 10u)) {
+            runtime->method_projectile_new_projectile = method;
+            runtime->projectile_new_projectile_signature_ready = true;
+            runtime->capabilities.projectile_factory_ready = true;
+            OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                           "[AI_FACTORY] Projectile.NewProjectile ready=yes "
+                           "args=10 authority=host-or-singleplayer");
+        } else {
+            or_release_handle(method);
+        }
+    }
+    or_release_handle(projectile_type);
+}
+
 bool or_runtime_probe(OR_Runtime *runtime) {
     static const char *const game_mode_names[] = {"GameMode", "gameMode"};
     static const char *const hard_mode_names[] = {"hardMode", "HardMode"};
@@ -2252,6 +2316,8 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     runtime->field_town_npc = or_resolve_field(runtime->npc_type, "townNPC", true, PATCH_BOOL, sizeof(bool));
     runtime->field_boss = or_resolve_field(runtime->npc_type, "boss", true, PATCH_BOOL, sizeof(bool));
     runtime->field_ai_style = or_resolve_field(runtime->npc_type, "aiStyle", true, PATCH_INT32, sizeof(int32_t));
+    runtime->field_dont_take_damage = or_resolve_field(
+        runtime->npc_type, "dontTakeDamage", true, PATCH_BOOL, sizeof(bool));
     /* Position is intentionally metadata-only in this version. Its native
      * representation must be confirmed before any byte or pointer read. */
     runtime->field_position_probe = or_probe_field(runtime->npc_type, "position");
@@ -2404,6 +2470,15 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     or_resolve_ai_method(runtime);
     or_resolve_loot_method(runtime);
     or_resolve_strike_method(runtime);
+    or_resolve_ai_factories(runtime);
+    runtime->capabilities.phase_immunity_ready = runtime->field_dont_take_damage != PATCH_NULL;
+    OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_CAPABILITY] velocity=%s projectile=%s summon=%s "
+                   "phaseImmunity=%s",
+                   runtime->field_velocity_probe ? "ready" : "unavailable",
+                   runtime->capabilities.projectile_factory_ready ? "ready" : "unavailable",
+                   runtime->capabilities.npc_spawn_factory_ready ? "ready" : "unavailable",
+                   runtime->capabilities.phase_immunity_ready ? "ready" : "unavailable");
     or_scan_boundary_methods(runtime);
     runtime->capabilities.ai_dispatcher_known_target = runtime->ai_known_dispatcher;
     return true;
@@ -2452,6 +2527,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->field_town_npc);
     or_release_handle(runtime->field_boss);
     or_release_handle(runtime->field_ai_style);
+    or_release_handle(runtime->field_dont_take_damage);
     or_release_handle(runtime->field_position_probe);
     or_release_handle(runtime->field_velocity_probe);
     or_release_handle(runtime->position_vector2_type_probe);
@@ -2516,6 +2592,8 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->method_ai);
     or_release_handle(runtime->method_npcloot);
     or_release_handle(runtime->method_strike_npc);
+    or_release_handle(runtime->method_npc_new_npc);
+    or_release_handle(runtime->method_projectile_new_projectile);
     or_release_handle(runtime->method_main_new_text);
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         or_release_handle(runtime->method_main_mouse_text[i]);

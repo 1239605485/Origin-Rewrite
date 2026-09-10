@@ -6,8 +6,9 @@
   "rageThreshold": 0.25,
   "archetypes": ["melee", "ranged", "flying", "worm", "swarm", "special"],
   "unknownAiStyleFallback": "melee",
-  "nativeExecution": "verified-velocity-phase-gated",
-  "projectileExecution": "disabled-until-NewProjectile-ABI-verified",
-  "summonExecution": "disabled-until-NPC-spawn-ABI-verified",
-  "fallback": "original-ai-first-and-preserved"
+  "nativeExecution": "enabled-full-archetype-actions",
+  "projectileExecution": "enabled-when-exact-NewProjectile-10-arg-signature-is-present",
+  "summonExecution": "enabled-when-exact-NewNPC-4-or-10-arg-signature-is-present",
+  "phaseImmunity": "enabled-when-dontTakeDamage-bool-field-is-present",
+  "fallback": "original-ai-first-and-preserved-only-when-target-member-is-absent"
 }

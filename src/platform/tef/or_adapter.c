@@ -85,6 +85,10 @@ typedef struct OR_NativeBinding {
     uint64_t last_seen_tick;
     uint64_t death_observed_tick;
     float previous_life_ratio;
+    uint8_t ai_summons_emitted;
+    bool phase_immunity_baseline;
+    bool phase_immunity_baseline_known;
+    bool phase_immunity_applied;
     OR_BossDialogAdapter boss_dialog;
 } OR_NativeBinding;
 
@@ -125,6 +129,9 @@ typedef struct OR_Adapter {
     uint64_t world_rules_session;
     OR_PlayerRuleAdapter player_rules;
     uint64_t last_player_rule_poll_tick;
+    uint64_t ai_factory_tick;
+    uint32_t ai_projectiles_this_tick;
+    uint32_t ai_summons_this_tick;
     bool world_bootstrap_emitted;
     bool rule_summary_emitted;
     uint64_t last_world_session_seen;
@@ -1242,12 +1249,18 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
                (int)slot_item_stack, (int)item_stack_arg,
                stack_read_ok && slot_item_stack == item_stack_arg ? "yes" : "no",
                call_ok ? "ok" : "failed", (int)result_slot);
-        if (call_ok) {
-            bool reward_claimed = or_state_claim_loot(g_adapter.state, binding->key);
+        {
+            bool writeback_verified = call_ok && slot_read_ok && stack_read_ok &&
+                                      item_type_arg == slot_item_type &&
+                                      item_stack_arg == slot_item_stack;
+            bool reward_claimed = writeback_verified &&
+                                   or_state_claim_loot(g_adapter.state, binding->key);
             OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[EXTRA_LOOT_COMMIT] item=%s id=%d stack=%d claimed=%s",
+                   "[EXTRA_LOOT_COMMIT] item=%s id=%d stack=%d claimed=%s "
+                   "writebackVerified=%s",
                    drop_name, (int)item_type_arg, (int)item_stack_arg,
-                   reward_claimed ? "yes" : "already_or_rejected");
+                   reward_claimed ? "yes" : "no",
+                   writeback_verified ? "yes" : "no");
         }
     }
 }
@@ -2107,7 +2120,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
             ++ai_candidate_log_samples;
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[AI_CANDIDATE] type=%u aiStyle=%d archetype=%s known=%s "
-                   "roll=not-yet-applied action=disabled",
+                   "roll=not-yet-applied action=plan-resolved",
                    (unsigned)npc_type, vanilla->ai_style,
                    or_ai_archetype_name(context.archetype),
                    archetype_known ? "yes" : "no");
@@ -2324,8 +2337,9 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                notice_requested ? (notice_ok ? "yes" : "no") : "skip");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] bodyColor/loot/special-AI skipped; goblin magic arc=low-density "
-           "NewDust; name marker active; NewText notice enabled for calamity+");
+           "[AI_MODE] bodyColor=enabled loot=verified-call-with-writeback-check "
+           "specialAI=full-factory-actions; goblin magic arc=low-density NewDust; "
+           "name marker active; NewText notice enabled for calamity+");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: concept=重构体 prefix=%s type=%u tier=%s progress=%s mode=%s",
            tier_prefix(spawn.tier) ? tier_prefix(spawn.tier) : "unavailable",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
@@ -2392,9 +2406,192 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     }
 }
 
-static void apply_special_ai(patch_handle_t instance, const OR_EliteRecord *record,
-                             uint32_t npc_type, uint32_t ai_tick,
-                             const OR_AiRuntimeState *ai_runtime) {
+static void reset_ai_factory_budget(void) {
+    uint64_t tick = update_tick();
+    if (tick == 0u) return;
+    if (g_adapter.ai_factory_tick != tick) {
+        g_adapter.ai_factory_tick = tick;
+        g_adapter.ai_projectiles_this_tick = 0u;
+        g_adapter.ai_summons_this_tick = 0u;
+    }
+}
+
+static int32_t ai_projectile_type(OR_AiTemplate template) {
+    /* These are the same vanilla projectile IDs used by EliteMonsters 1.3.2
+     * and are only called through the exact ten-argument factory signature. */
+    switch (template) {
+        case OR_AI_TEMPLATE_FAN_SHOT: return 27;      /* IceBolt */
+        case OR_AI_TEMPLATE_PHASE: return 20;         /* CursedFlame */
+        case OR_AI_TEMPLATE_PROJECTILE_BURST:
+        case OR_AI_TEMPLATE_RAGE:
+        default: return 17;                           /* Fireball */
+    }
+}
+
+static bool spawn_ai_projectiles(patch_handle_t instance,
+                                 const OR_EliteRecord *record,
+                                 OR_AiTemplate template,
+                                 uint32_t ai_tick) {
+    float position[2];
+    float velocity[2];
+    int32_t projectile_type;
+    int32_t damage;
+    uint32_t requested;
+    uint32_t spawned = 0u;
+    uint32_t i;
+    float direction;
+    if (!instance || !record || !g_adapter.runtime ||
+        !g_adapter.runtime->projectile_new_projectile_signature_ready ||
+        !g_adapter.runtime->method_projectile_new_projectile ||
+        !patchlib_method_invoke_args ||
+        (ai_tick % (template == OR_AI_TEMPLATE_FAN_SHOT ? 18u : 24u)) != 0u ||
+        g_adapter.ai_projectiles_this_tick >= 12u) return false;
+    if (!read_vector2_field(g_adapter.runtime->field_position_probe, instance, position) ||
+        !read_vector2_field(g_adapter.runtime->field_velocity_probe, instance, velocity)) return false;
+    projectile_type = ai_projectile_type(template);
+    damage = record->final_stats.damage > 0 ? record->final_stats.damage / 3 : 8;
+    if (damage < 1) damage = 1;
+    if (damage > 2500) damage = 2500;
+    requested = template == OR_AI_TEMPLATE_FAN_SHOT
+        ? (record->ai_plan.fan_shot_count > 0u ? record->ai_plan.fan_shot_count : 3u)
+        : 1u;
+    if (requested > 5u) requested = 5u;
+    direction = velocity[0] < -0.05f ? -1.0f : 1.0f;
+    for (i = 0u; i < requested && g_adapter.ai_projectiles_this_tick < 12u; ++i) {
+        float spread = requested == 1u ? 0.0f :
+            ((float)i - (float)(requested - 1u) * 0.5f) * 0.22f;
+        float x = position[0];
+        float y = position[1];
+        float speed_x = direction * 6.0f;
+        float speed_y = spread * 6.0f;
+        float knockback = 2.0f;
+        int32_t owner = -1;
+        float ai0 = 0.0f;
+        float ai1 = 0.0f;
+        int32_t type = projectile_type;
+        int32_t projectile_damage = damage;
+        int32_t result = -1;
+        void *args[10] = {&x, &y, &speed_x, &speed_y, &type,
+                          &projectile_damage, &knockback, &owner, &ai0, &ai1};
+        if (patchlib_method_invoke_args(
+                g_adapter.runtime->method_projectile_new_projectile,
+                PATCH_NULL, &result, args) && result >= 0) {
+            ++spawned;
+            ++g_adapter.ai_projectiles_this_tick;
+        }
+    }
+    if (spawned > 0u) {
+        static uint32_t log_samples;
+        if (log_samples < 64u) {
+            ++log_samples;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_PROJECTILE_SPAWN] type=%u tier=%s template=%s "
+                   "projectile=%d requested=%u spawned=%u damage=%d",
+                   (unsigned)record->npc_type, or_elite_tier_name(record->tier),
+                   ai_template_name(template), (int)projectile_type,
+                   (unsigned)requested, (unsigned)spawned, (int)damage);
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool spawn_ai_summons(patch_handle_t instance,
+                             OR_NativeBinding *binding,
+                             const OR_EliteRecord *record,
+                             uint32_t ai_tick) {
+    unsigned char position_raw[8] = {0};
+    float position[2];
+    uint8_t requested;
+    uint8_t spawned = 0u;
+    uint8_t i;
+    int32_t x;
+    int32_t y;
+    if (!instance || !binding || !record || !g_adapter.runtime ||
+        !g_adapter.runtime->npc_new_npc_signature_ready ||
+        !g_adapter.runtime->method_npc_new_npc || !patchlib_method_invoke_args ||
+        binding->ai_summons_emitted >= OR_MAX_AI_SUMMONS ||
+        (ai_tick % 36u) != 0u || g_adapter.ai_summons_this_tick >= 2u ||
+        !read_position_raw(g_adapter.runtime->field_position_probe, instance, position_raw)) return false;
+    memcpy(&position[0], position_raw, sizeof(float));
+    memcpy(&position[1], position_raw + sizeof(float), sizeof(float));
+    if (!isfinite(position[0]) || !isfinite(position[1])) return false;
+    x = (int32_t)position[0];
+    y = (int32_t)position[1];
+    requested = record->ai_plan.summon_count > 0u
+        ? record->ai_plan.summon_count : 1u;
+    if (requested > OR_MAX_AI_SUMMONS) requested = OR_MAX_AI_SUMMONS;
+    for (i = 0u; i < requested && binding->ai_summons_emitted < OR_MAX_AI_SUMMONS &&
+                g_adapter.ai_summons_this_tick < 2u; ++i) {
+        int32_t type = (int32_t)record->npc_type;
+        int32_t start = 0;
+        int32_t result = -1;
+        int32_t spawn_x = x + (i == 0u ? -72 : 72);
+        int32_t spawn_y = y - 40;
+        float ai0 = 0.0f, ai1 = 0.0f, ai2 = 0.0f, ai3 = 0.0f;
+        float ai4 = 0.0f, ai5 = 0.0f;
+        void *args4[4] = {&spawn_x, &spawn_y, &type, &start};
+        void *args10[10] = {&spawn_x, &spawn_y, &type, &start, &ai0, &ai1,
+                             &ai2, &ai3, &ai4, &ai5};
+        void **args = g_adapter.runtime->npc_new_npc_arg_count == 10
+            ? args10 : args4;
+        if (patchlib_method_invoke_args(g_adapter.runtime->method_npc_new_npc,
+                                        PATCH_NULL, &result, args) && result >= 0) {
+            ++spawned;
+            ++binding->ai_summons_emitted;
+            ++g_adapter.ai_summons_this_tick;
+        }
+    }
+    if (spawned > 0u) {
+        static uint32_t log_samples;
+        if (log_samples < 32u) {
+            ++log_samples;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_SUMMON_SPAWN] type=%u tier=%s summonedType=%u "
+                   "requested=%u spawned=%u cap=%u",
+                   (unsigned)record->npc_type, or_elite_tier_name(record->tier),
+                   (unsigned)record->npc_type, (unsigned)requested,
+                   (unsigned)spawned, (unsigned)OR_MAX_AI_SUMMONS);
+        }
+        return true;
+    }
+    return false;
+}
+
+static void apply_phase_immunity(patch_handle_t instance,
+                                 OR_NativeBinding *binding,
+                                 const OR_EliteRecord *record) {
+    OR_AiTemplate template;
+    bool active;
+    if (!instance || !binding || !record || !g_adapter.runtime ||
+        !g_adapter.runtime->field_dont_take_damage) return;
+    if (!binding->phase_immunity_baseline_known) {
+        if (!read_bool(g_adapter.runtime->field_dont_take_damage, instance,
+                       &binding->phase_immunity_baseline)) return;
+        binding->phase_immunity_baseline_known = true;
+    }
+    template = record->ai_plan.has_finisher
+        ? record->ai_plan.finisher : record->ai_plan.primary;
+    active = binding->ai_runtime.phase == OR_AI_PHASE_ACTIVE &&
+             template == OR_AI_TEMPLATE_PHASE;
+    if (active && !binding->phase_immunity_applied) {
+        bool immune = true;
+        if (field_write(g_adapter.runtime->field_dont_take_damage, instance, &immune)) {
+            binding->phase_immunity_applied = true;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_PHASE_IMMUNITY] type=%u state=active duration=tick-gated write=ok",
+                   (unsigned)record->npc_type);
+        }
+    } else if (!active && binding->phase_immunity_applied) {
+        (void)field_write(g_adapter.runtime->field_dont_take_damage, instance,
+                          &binding->phase_immunity_baseline);
+        binding->phase_immunity_applied = false;
+    }
+}
+
+static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
+                             const OR_EliteRecord *record,
+                             uint32_t npc_type, uint32_t ai_tick) {
     float velocity[2];
     float speed;
     float direction;
@@ -2402,6 +2599,9 @@ static void apply_special_ai(patch_handle_t instance, const OR_EliteRecord *reco
     float movement_multiplier;
     OR_AiTemplate template;
     bool rage_active;
+    OR_AiRuntimeState *ai_runtime;
+    if (!binding) return;
+    ai_runtime = &binding->ai_runtime;
     if (!ORIGINREWRITE_ENABLE_SPECIAL_AI || !instance || !record ||
         !g_adapter.runtime || !g_adapter.runtime->field_velocity_probe ||
         !ai_runtime || ai_runtime->phase != OR_AI_PHASE_ACTIVE ||
@@ -2471,6 +2671,13 @@ static void apply_special_ai(patch_handle_t instance, const OR_EliteRecord *reco
                    ai_template_name(template),
                    (double)velocity[0], (double)velocity[1]);
         }
+    }
+    reset_ai_factory_budget();
+    if (template == OR_AI_TEMPLATE_PROJECTILE_BURST ||
+        template == OR_AI_TEMPLATE_FAN_SHOT || template == OR_AI_TEMPLATE_PHASE) {
+        (void)spawn_ai_projectiles(instance, record, template, ai_tick);
+    } else if (template == OR_AI_TEMPLATE_SUMMON) {
+        (void)spawn_ai_summons(instance, binding, record, ai_tick);
     }
 }
 
@@ -2621,9 +2828,9 @@ static void ai_postfix(
                                (double)record->ai_plan.rage_threshold);
                     }
                 }
-                apply_special_ai(instance, record, npc_type,
-                                 (uint32_t)binding->ai_ticks,
-                                 &binding->ai_runtime);
+                apply_phase_immunity(instance, binding, record);
+                apply_special_ai(instance, binding, record, npc_type,
+                                 (uint32_t)binding->ai_ticks);
             }
         }
         binding->previous_life_ratio = current_ratio;

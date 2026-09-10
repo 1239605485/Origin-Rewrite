@@ -31,6 +31,9 @@ typedef struct OR_RuntimeCapabilities {
     bool visual_hit_effect_ready;
     bool dust_new_dust_ready;
     bool dust_value_invoke_ready;
+    bool npc_spawn_factory_ready;
+    bool projectile_factory_ready;
+    bool phase_immunity_ready;
     bool given_name_property_ready;
     bool new_text_ready;
     bool name_color_hook_ready;
@@ -45,6 +48,11 @@ typedef struct OR_Runtime {
     patch_handle_t method_item_new_item;
     patch_handle_t method_item_new_item_extended;
     patch_handle_t method_item_id_from_net_id;
+    patch_handle_t method_npc_new_npc;
+    patch_handle_t method_projectile_new_projectile;
+    int npc_new_npc_arg_count;
+    bool npc_new_npc_signature_ready;
+    bool projectile_new_projectile_signature_ready;
     patch_handle_t main_item_field;
     bool item_new_item_signature_ready;
     bool item_id_type_resolved;
@@ -68,6 +76,7 @@ typedef struct OR_Runtime {
     patch_handle_t field_town_npc;
     patch_handle_t field_boss;
     patch_handle_t field_ai_style;
+    patch_handle_t field_dont_take_damage;
     patch_handle_t field_position_probe;
     patch_handle_t field_velocity_probe;
     patch_handle_t position_vector2_type_probe;
