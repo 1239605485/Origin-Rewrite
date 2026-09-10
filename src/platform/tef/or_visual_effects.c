@@ -118,22 +118,22 @@ static bool emit_spawn_offset(const OR_Runtime *runtime,
     if (tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE) return false;
     switch (tier) {
         case OR_TIER_ALTERED:
-            color_raw[0] = 73u;   /* #49C96D */
-            color_raw[1] = 201u;
-            color_raw[2] = 109u;
-            color_name = "altered_green";
+            color_raw[0] = 143u;  /* #8FFFA8 */
+            color_raw[1] = 255u;
+            color_raw[2] = 168u;
+            color_name = "altered_mint";
             break;
         case OR_TIER_CALAMITY:
-            color_raw[0] = 66u;   /* #4287F5 */
-            color_raw[1] = 135u;
-            color_raw[2] = 245u;
-            color_name = "calamity_blue";
+            color_raw[0] = 128u;  /* #80C7FF */
+            color_raw[1] = 199u;
+            color_raw[2] = 255u;
+            color_name = "calamity_sky";
             break;
         case OR_TIER_APOCALYPSE:
-            color_raw[0] = 192u;  /* #C04CFF */
-            color_raw[1] = 76u;
+            color_raw[0] = 240u;  /* #F0A0FF */
+            color_raw[1] = 160u;
             color_raw[2] = 255u;
-            color_name = "apocalypse_purple";
+            color_name = "apocalypse_lilac";
             break;
         default:
             return false;

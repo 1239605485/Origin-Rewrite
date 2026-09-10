@@ -67,7 +67,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
 bash scripts/package_android_arm64.sh
 ```
 
-产物 `OriginRewrite-v1.0.25-github-actions-arm64.zip` 可直接导入
+产物 `OriginRewrite-v1.0.26-color-abi-name-hook-arm64.zip` 可直接导入
 TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
 [`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 

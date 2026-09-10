@@ -8,6 +8,7 @@
 #include "tefkernel/patchlib/property.h"
 
 #define OR_SETDEFAULTS_METHOD_LIMIT 8u
+#define OR_MOUSE_TEXT_METHOD_LIMIT 2u
 
 #ifdef __cplusplus
 extern "C" {
@@ -138,7 +139,8 @@ typedef struct OR_Runtime {
     int main_new_text_arg_count;
     patch_type_t main_new_text_color_type;
     patch_type_t main_new_text_second_type;
-    patch_handle_t method_main_mouse_text;
+    patch_handle_t method_main_mouse_text[OR_MOUSE_TEXT_METHOD_LIMIT];
+    size_t main_mouse_text_method_count;
     bool main_mouse_text_signature_ready;
 
     patch_hook_id_t setdefaults_hook_ids[OR_SETDEFAULTS_METHOD_LIMIT];
@@ -149,7 +151,7 @@ typedef struct OR_Runtime {
     patch_hook_id_t loot_hook_id;
     patch_hook_id_t loot_observer_hook_id;
     patch_hook_id_t strike_hook_id;
-    patch_hook_id_t mouse_text_hook_id;
+    patch_hook_id_t mouse_text_hook_ids[OR_MOUSE_TEXT_METHOD_LIMIT];
     OR_RuntimeCapabilities capabilities;
 } OR_Runtime;
 

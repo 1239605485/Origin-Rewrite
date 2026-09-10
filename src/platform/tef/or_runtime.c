@@ -1093,7 +1093,9 @@ void or_runtime_init(OR_Runtime *runtime) {
     runtime->loot_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->loot_observer_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
-    runtime->mouse_text_hook_id = PATCH_HOOK_INVALID_ID;
+    for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
+        runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
+    }
     for (i = 0; i < OR_SETDEFAULTS_METHOD_LIMIT; ++i) {
         runtime->setdefaults_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }
@@ -1590,9 +1592,11 @@ cleanup:
 static void or_resolve_mouse_text_method(OR_Runtime *runtime,
                                          patch_handle_t main_type) {
     int parameter_count;
+    size_t method_count = 0u;
     if (!runtime || !main_type || !patchlib_type_get_method_by_param_count ||
         !patchlib_method_get_signature || !tefstd_vector_size) return;
     runtime->main_mouse_text_signature_ready = false;
+    runtime->main_mouse_text_method_count = 0u;
     for (parameter_count = 0; parameter_count <= 10; ++parameter_count) {
         patch_handle_t method = patchlib_type_get_method_by_param_count(
             main_type, "MouseText", parameter_count);
@@ -1606,32 +1610,46 @@ static void or_resolve_mouse_text_method(OR_Runtime *runtime,
         memset(&signature, 0, sizeof(signature));
         if (patchlib_method_get_signature(method, &signature)) {
             count = tefstd_vector_size(&signature.arg_types);
-            exact = !signature.is_instance && signature.return_type == PATCH_VOID &&
-                    count == 7u &&
+            /* The target mobile build exposes MouseText as an instance method
+             * with 8/10 explicit parameters. The first parameter is the
+             * managed display string, followed by the vanilla rarity index
+             * and diff byte. Keep the remaining parameters opaque: they are
+             * only forwarded by the original method and are never touched by
+             * this prefix hook. */
+            exact = signature.is_instance && signature.return_type == PATCH_VOID &&
+                    (count == 8u || count == 10u) &&
                     (or_signature_arg_type(&signature, 0u) == PATCH_OBJECT ||
                      or_signature_arg_type(&signature, 0u) == PATCH_POINTER) &&
                     or_signature_arg_type(&signature, 1u) == PATCH_INT32 &&
-                    or_signature_arg_type(&signature, 2u) == PATCH_UINT8 &&
-                    or_signature_arg_type(&signature, 3u) == PATCH_INT32 &&
-                    or_signature_arg_type(&signature, 4u) == PATCH_INT32 &&
-                    or_signature_arg_type(&signature, 5u) == PATCH_INT32 &&
-                    or_signature_arg_type(&signature, 6u) == PATCH_INT32;
+                    or_signature_arg_type(&signature, 2u) == PATCH_UINT8;
             OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
                            "[NAME_COLOR_PROBE] method=MouseText instance=%s "
                            "returnType=%d argCount=%zu status=%s",
                            signature.is_instance ? "yes" : "no",
                            (int)signature.return_type, count,
                            exact ? "verified" : "rejected");
+            if (exact) {
+                size_t arg_index;
+                for (arg_index = 0u; arg_index < count; ++arg_index) {
+                    OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                                   "[NAME_COLOR_ARG] method=MouseText index=%zu type=%d",
+                                   arg_index,
+                                   (int)or_signature_arg_type(&signature, arg_index));
+                }
+            }
             if (patchlib_method_signature_free) {
                 (void)patchlib_method_signature_free(&signature);
             }
         }
-        if (exact) {
-            runtime->method_main_mouse_text = method;
+        if (exact && method_count < OR_MOUSE_TEXT_METHOD_LIMIT) {
+            runtime->method_main_mouse_text[method_count++] = method;
+            runtime->main_mouse_text_method_count = method_count;
             runtime->main_mouse_text_signature_ready = true;
             runtime->capabilities.name_color_hook_ready = true;
             method = PATCH_NULL;
-            break;
+        } else if (exact) {
+            OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
+                           "[NAME_COLOR_PROBE] method=MouseText status=extra_overload_skipped");
         }
         or_release_handle(method);
     }
@@ -2346,7 +2364,9 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_uninstall_hook(&runtime->loot_hook_id);
     or_uninstall_hook(&runtime->loot_observer_hook_id);
     or_uninstall_hook(&runtime->strike_hook_id);
-    or_uninstall_hook(&runtime->mouse_text_hook_id);
+    for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
+        or_uninstall_hook(&runtime->mouse_text_hook_ids[i]);
+    }
 
     or_release_handle(runtime->field_active);
     or_release_handle(runtime->field_life_max);
@@ -2425,7 +2445,9 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->method_npcloot);
     or_release_handle(runtime->method_strike_npc);
     or_release_handle(runtime->method_main_new_text);
-    or_release_handle(runtime->method_main_mouse_text);
+    for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
+        or_release_handle(runtime->method_main_mouse_text[i]);
+    }
     or_release_handle(runtime->method_item_new_item);
     or_release_handle(runtime->method_item_new_item_extended);
     or_release_handle(runtime->method_item_id_from_net_id);
@@ -2441,7 +2463,9 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     runtime->loot_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->loot_observer_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
-    runtime->mouse_text_hook_id = PATCH_HOOK_INVALID_ID;
+    for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
+        runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
+    }
     for (i = 0; i < OR_SETDEFAULTS_METHOD_LIMIT; ++i) {
         runtime->setdefaults_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }

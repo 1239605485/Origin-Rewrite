@@ -2516,13 +2516,15 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
     if (!text_handle) return true;
     text = patchlib_string_cstr(text_handle);
     if (!text) return true;
-    if (strncmp(text, "终焉体·", strlen("终焉体·")) == 0) {
+    /* FullName on this build may prepend the vanilla type name, so the
+     * rewrite marker is not guaranteed to be at offset zero. */
+    if (strstr(text, "终焉体·") != NULL) {
         tier = "终焉体";
         replacement = 5; /* vanilla pink */
-    } else if (strncmp(text, "灾变体·", strlen("灾变体·")) == 0) {
+    } else if (strstr(text, "灾变体·") != NULL) {
         tier = "灾变体";
         replacement = 9; /* vanilla cyan */
-    } else if (strncmp(text, "异化体·", strlen("异化体·")) == 0) {
+    } else if (strstr(text, "异化体·") != NULL) {
         tier = "异化体";
         replacement = 7; /* vanilla lime */
     } else {
@@ -2622,16 +2624,25 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
            "[NAME_COLOR_API] MouseText=%s signature=%s",
            runtime->capabilities.name_color_hook_ready ? "available" : "unavailable",
            runtime->main_mouse_text_signature_ready ? "verified" : "safe_off");
-    if (runtime->capabilities.name_color_hook_ready &&
-        install_prefix(runtime->method_main_mouse_text,
-                       mouse_text_name_color_prefix,
-                       &runtime->mouse_text_hook_id)) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[NAME_COLOR_HOOK] installed=yes source=MouseText "
-               "palette=altered:lime,calamity:cyan,apocalypse:pink");
-    } else {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[NAME_COLOR_HOOK] installed=no reason=signature_or_install_unavailable");
+    {
+        size_t mouse_text_hooks = 0u;
+        for (i = 0u; i < runtime->main_mouse_text_method_count &&
+                    i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
+            if (install_prefix(runtime->method_main_mouse_text[i],
+                               mouse_text_name_color_prefix,
+                               &runtime->mouse_text_hook_ids[mouse_text_hooks])) {
+                ++mouse_text_hooks;
+            }
+        }
+        if (runtime->capabilities.name_color_hook_ready && mouse_text_hooks > 0u) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[NAME_COLOR_HOOK] installed=yes count=%u source=MouseText "
+               "palette=altered:lime,calamity:cyan,apocalypse:pink",
+               (unsigned)mouse_text_hooks);
+        } else {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[NAME_COLOR_HOOK] installed=no reason=signature_or_install_unavailable");
+        }
     }
     OR_DIAG_LOG("adapter_ready setdefaults_candidates=%u stats_fields=ok",
                 (unsigned)runtime->method_setdefaults_count);

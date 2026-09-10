@@ -68,6 +68,77 @@ static void commit_message_id(OR_BroadcastState *state, uint32_t message_id) {
     state->next_message_id = next == 0u ? 1u : next;
 }
 
+static bool invoke_new_text(const OR_Runtime *runtime,
+                            patch_handle_t text_handle,
+                            const uint8_t rgba[4],
+                            bool force_display,
+    uint64_t *ignored_return) {
+    void *args[4] = {NULL, NULL, NULL, NULL};
+#if defined(__ANDROID__)
+    static const patch_type_t color_fields[] = {
+        PATCH_UINT8, PATCH_UINT8, PATCH_UINT8, PATCH_UINT8
+    };
+#endif
+    if (!runtime || !text_handle || !rgba || !ignored_return ||
+        !runtime->method_main_new_text || !patchlib_method_invoke_args) return false;
+    args[0] = &text_handle;
+    if (runtime->main_new_text_arg_count == 1) {
+        return patchlib_method_invoke_args(runtime->method_main_new_text,
+                                           PATCH_NULL, ignored_return, args);
+    }
+    if (runtime->main_new_text_arg_count == 3 &&
+        runtime->main_new_text_color_type == PATCH_POINTER) {
+#if defined(__ANDROID__)
+        static bool color_abi_logged;
+        patchlib_value_arg_t value_args[3] = {
+            {NULL, 0u, NULL, 0u},
+            {(void *)rgba, 4u, color_fields, 4u},
+            {NULL, 0u, NULL, 0u}
+        };
+        if (!patchlib_method_invoke_value_args) return false;
+        if (!color_abi_logged) {
+            color_abi_logged = true;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[NEWTEXT_COLOR_ABI] mode=value fields=uint8,uint8,uint8,uint8 "
+                   "size=4 verified=yes");
+        }
+        /* Color is a managed value type. Passing the four component bytes as
+         * a raw pointer through invoke_args loses the value-type ABI; the
+         * value bridge is required for the mobile NewText overload. */
+        args[1] = (void *)rgba;
+        args[2] = &force_display;
+        return patchlib_method_invoke_value_args(runtime->method_main_new_text,
+                                                 PATCH_NULL, ignored_return,
+                                                 args, value_args);
+#else
+        (void)force_display;
+        return false;
+#endif
+    }
+    if (runtime->main_new_text_arg_count == 4) {
+        uint8_t red = rgba[0];
+        uint8_t green = rgba[1];
+        uint8_t blue = rgba[2];
+        int32_t red_i = (int32_t)rgba[0];
+        int32_t green_i = (int32_t)rgba[1];
+        int32_t blue_i = (int32_t)rgba[2];
+        if (runtime->main_new_text_color_type == PATCH_UINT8) {
+            args[1] = &red;
+            args[2] = &green;
+            args[3] = &blue;
+        } else if (runtime->main_new_text_color_type == PATCH_INT32) {
+            args[1] = &red_i;
+            args[2] = &green_i;
+            args[3] = &blue_i;
+        } else {
+            return false;
+        }
+        return patchlib_method_invoke_args(runtime->method_main_new_text,
+                                           PATCH_NULL, ignored_return, args);
+    }
+    return false;
+}
+
 bool or_broadcast_emit_elite(OR_BroadcastState *state,
                              const OR_Runtime *runtime,
                              OR_EliteTier tier,
@@ -79,29 +150,14 @@ bool or_broadcast_emit_elite(OR_BroadcastState *state,
     patch_handle_t message_handle;
     uint32_t message_id;
     uint64_t ignored_return = 0u;
-    void *args[4] = {NULL, NULL, NULL, NULL};
     bool force_display = true;
     uint8_t rgba[4];
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
-    void *color_pointer_storage;
-    int32_t red_i;
-    int32_t green_i;
-    int32_t blue_i;
     const char *prefix;
 
     if (!state || !runtime || tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE) return false;
     message_id = next_message_id(state);
     prefix = tier_prefix(tier);
     tier_rgba(tier, rgba);
-    red = rgba[0];
-    green = rgba[1];
-    blue = rgba[2];
-    color_pointer_storage = rgba;
-    red_i = red;
-    green_i = green;
-    blue_i = blue;
     if (!prefix || !runtime->capabilities.new_text_ready ||
         (runtime->main_new_text_arg_count != 1 &&
          runtime->main_new_text_arg_count != 3 &&
@@ -135,40 +191,12 @@ bool or_broadcast_emit_elite(OR_BroadcastState *state,
         (int)sizeof(message)) return false;
     message_handle = patchlib_string_create(message);
     if (!message_handle) return false;
-    args[0] = &message_handle;
-    if (runtime->main_new_text_arg_count == 3) {
-        if (runtime->main_new_text_color_type != PATCH_POINTER) {
-            OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=color_pointer_abi_unknown",
-                   (unsigned)message_id, (unsigned)npc_type);
-            return false;
-        }
-        /* PATCH_POINTER is the native pointer slot for the managed Color
-         * valuetype. The invoke API expects args[index] to point at that slot. */
-        args[1] = &color_pointer_storage;
-        args[2] = &force_display;
-    } else if (runtime->main_new_text_arg_count == 4) {
-        if (runtime->main_new_text_color_type == PATCH_UINT8) {
-            args[1] = &red;
-            args[2] = &green;
-            args[3] = &blue;
-        } else if (runtime->main_new_text_color_type == PATCH_INT32) {
-            args[1] = &red_i;
-            args[2] = &green_i;
-            args[3] = &blue_i;
-        } else {
-            OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=color_abi_unknown",
-                   (unsigned)message_id, (unsigned)npc_type);
-            return false;
-        }
-    }
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[BROADCAST_COLOR] messageId=%u rgba=%u,%u,%u,%u",
            (unsigned)message_id, (unsigned)rgba[0], (unsigned)rgba[1],
            (unsigned)rgba[2], (unsigned)rgba[3]);
-    if (!patchlib_method_invoke_args(runtime->method_main_new_text,
-                                     PATCH_NULL, &ignored_return, args)) {
+    if (!invoke_new_text(runtime, message_handle, rgba, force_display,
+                         &ignored_return)) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "[BROADCAST_SAFE_OFF] messageId=%u type=%u reason=invoke_failed",
                (unsigned)message_id, (unsigned)npc_type);
@@ -196,9 +224,7 @@ bool or_broadcast_emit_terrain(OR_BroadcastState *state,
     char message[192];
     patch_handle_t string_handle;
     uint64_t ignored_return = 0u;
-    void *args[4] = {NULL, NULL, NULL, NULL};
     uint8_t rgba[4] = {138u, 231u, 255u, 255u}; /* terrain: bright cyan */
-    void *color_slot = NULL;
     bool force_display = true;
     uint32_t key = ((uint32_t)terrain.depth << 16) |
                    ((uint32_t)terrain.biome << 8) | (uint32_t)terrain.special;
@@ -228,23 +254,12 @@ bool or_broadcast_emit_terrain(OR_BroadcastState *state,
     if (count < 0 || count >= (int)sizeof(message)) return false;
     string_handle = patchlib_string_create(message);
     if (!string_handle) return false;
-    args[0] = &string_handle;
-    if (runtime->main_new_text_arg_count == 3 && runtime->main_new_text_color_type == PATCH_POINTER) {
-        color_slot = rgba;
-        args[1] = &color_slot;
-        args[2] = &force_display;
-    } else if (runtime->main_new_text_arg_count != 1) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[TERRAIN_BROADCAST_SKIP] reason=notice_signature argCount=%d colorType=%d",
-               runtime->main_new_text_arg_count, (int)runtime->main_new_text_color_type);
-        return false;
-    }
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[BROADCAST_COLOR] channel=terrain rgba=%u,%u,%u,%u",
            (unsigned)rgba[0], (unsigned)rgba[1], (unsigned)rgba[2],
            (unsigned)rgba[3]);
-    if (!patchlib_method_invoke_args(runtime->method_main_new_text, PATCH_NULL,
-                                     &ignored_return, args)) {
+    if (!invoke_new_text(runtime, string_handle, rgba, force_display,
+                         &ignored_return)) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[TERRAIN_BROADCAST_SKIP] reason=invoke_failed key=%u", (unsigned)key);
         return false;
@@ -269,9 +284,7 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
     char message[160];
     patch_handle_t string_handle;
     uint64_t ignored_return = 0u;
-    void *args[4] = {NULL, NULL, NULL, NULL};
     uint8_t rgba[4] = {255u, 196u, 119u, 255u}; /* weather: soft amber */
-    void *color_slot = NULL;
     bool force_display = true;
     uint32_t key = ((uint32_t)weather << 1) | (is_night ? 1u : 0u);
     const char *weather_name;
@@ -296,21 +309,12 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
     if (count < 0 || count >= (int)sizeof(message)) return false;
     string_handle = patchlib_string_create(message);
     if (!string_handle) return false;
-    args[0] = &string_handle;
-    if (runtime->main_new_text_arg_count == 3 && runtime->main_new_text_color_type == PATCH_POINTER) {
-        color_slot = rgba;
-        args[1] = &color_slot;
-        args[2] = &force_display;
-    } else if (runtime->main_new_text_arg_count != 1) {
-        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=notice_signature");
-        return false;
-    }
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[BROADCAST_COLOR] channel=weather rgba=%u,%u,%u,%u",
            (unsigned)rgba[0], (unsigned)rgba[1], (unsigned)rgba[2],
            (unsigned)rgba[3]);
-    if (!patchlib_method_invoke_args(runtime->method_main_new_text, PATCH_NULL,
-                                     &ignored_return, args)) {
+    if (!invoke_new_text(runtime, string_handle, rgba, force_display,
+                         &ignored_return)) {
         OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=invoke_failed key=%u", (unsigned)key);
         return false;
     }
@@ -332,9 +336,7 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
     char message[256];
     patch_handle_t text;
     uint64_t ignored = 0u;
-    void *args[4] = {NULL, NULL, NULL, NULL};
     bool force = true;
-    void *color_slot = NULL;
     uint8_t rgba[4] = {255u, 224u, 138u, 255u}; /* world rules: pale gold */
     size_t i;
     int used;
@@ -364,16 +366,11 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
         message[len] = ')'; message[len + 1u] = '\0';
     }
     text = patchlib_string_create(message); if (!text) return false;
-    args[0] = &text;
-    if (runtime->main_new_text_arg_count == 3 && runtime->main_new_text_color_type == PATCH_POINTER) {
-        color_slot = rgba;
-        args[1] = &color_slot; args[2] = &force;
-    } else if (runtime->main_new_text_arg_count != 1) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[BROADCAST_COLOR] channel=world_rule rgba=%u,%u,%u,%u",
            (unsigned)rgba[0], (unsigned)rgba[1], (unsigned)rgba[2],
            (unsigned)rgba[3]);
-    if (!patchlib_method_invoke_args(runtime->method_main_new_text, PATCH_NULL, &ignored, args)) return false;
+    if (!invoke_new_text(runtime, text, rgba, force, &ignored)) return false;
     state->last_rule_summary_key = ((uint64_t)snapshot->active_mask << 32) |
                                    (uint64_t)snapshot->progress;
     OR_LOG(MOD_LOG_LEVEL_INFO, "[RULE_SUMMARY_BROADCAST] stage=%s rules=%u", or_progress_stage_name(snapshot->progress), (unsigned)snapshot->selected_count);
@@ -382,17 +379,16 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
 
 bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *runtime,
                                    uint32_t npc_type, OR_BossDialogEvent event, uint64_t now_tick) {
-    char message[160]; patch_handle_t text; uint64_t ignored=0; void *args[4]={NULL}; bool force=true;
-    uint8_t rgba[4]={255u,156u,168u,255u}; void *color_slot=NULL;
+    char message[160]; patch_handle_t text; uint64_t ignored=0; bool force=true;
+    uint8_t rgba[4]={255u,156u,168u,255u};
     if (!state || !runtime || !runtime->capabilities.new_text_ready ||
         (runtime->main_new_text_arg_count != 1 && runtime->main_new_text_arg_count != 3) || !patchlib_string_create || !patchlib_method_invoke_args) return false;
     if (state->last_emit_tick && now_tick < state->last_emit_tick + 120u) return false;
     if (event != OR_BOSS_DIALOG_SPAWN && event != OR_BOSS_DIALOG_HALF && event != OR_BOSS_DIALOG_DEATH) return false;
     snprintf(message,sizeof(message), event == OR_BOSS_DIALOG_HALF ? "【首领回响】目标 #%u 的防线正在瓦解。" : (event == OR_BOSS_DIALOG_DEATH ? "【首领回响】目标 #%u 的回响已归于寂静。" : "【首领回响】目标 #%u 已被起源律动锁定。"), (unsigned)npc_type);
-    text=patchlib_string_create(message); if (!text) return false; args[0]=&text;
-    if (runtime->main_new_text_arg_count == 3) { if (runtime->main_new_text_color_type != PATCH_POINTER) return false; color_slot=rgba; args[1]=&color_slot; args[2]=&force; }
+    text=patchlib_string_create(message); if (!text) return false;
     OR_LOG(MOD_LOG_LEVEL_INFO,"[BROADCAST_COLOR] channel=boss rgba=%u,%u,%u,%u",
            (unsigned)rgba[0],(unsigned)rgba[1],(unsigned)rgba[2],(unsigned)rgba[3]);
-    if (!patchlib_method_invoke_args(runtime->method_main_new_text,PATCH_NULL,&ignored,args)) return false;
+    if (!invoke_new_text(runtime, text, rgba, force, &ignored)) return false;
     state->last_emit_tick=now_tick; OR_LOG(MOD_LOG_LEVEL_INFO,"[BOSS_DIALOG] type=%u event=%s",(unsigned)npc_type,event == OR_BOSS_DIALOG_HALF ? "half" : (event == OR_BOSS_DIALOG_DEATH ? "death" : "spawn")); return true;
 }
