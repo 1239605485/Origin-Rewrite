@@ -6,7 +6,7 @@
   "worldRuleChangeEveryDays": 3,
   "terrainNoticeCooldownTicks": 36000,
   "enableGameplayHooks": true,
-  "enableNativeExtraLoot": false,
+  "enableNativeExtraLoot": true,
   "allowVanillaCrates": false,
   "alteredExtraRewardChance": 0.20,
   "maxExtraRewardSlots": 1,

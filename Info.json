@@ -2,8 +2,8 @@
   "pkgId": "li06.originrewrite",
   "name": "OriginRewrite_起源重构（PatchLib 架构版）",
   "author": "liuxin",
-  "version": "1.0.28-elite-name-color-path-arm64",
-  "versionCode": 2026091028,
+  "version": "1.0.29-elite-loot-test-arm64",
+  "versionCode": 2026091029,
   "brieflyDescribe": "OriginRewrite Android ARM64：TEFKernel PatchLib + 纯 C 规则核心",
   "description": "起源重构 v1.0：三档重构体、世界规则、地形规则和原版掉落策略；不使用 BNM，仅支持单机。",
   "features": [

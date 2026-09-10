@@ -22,9 +22,9 @@ static OR_Runtime g_runtime;
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026091028,
+    .version_code = 2026091029,
     .api_version = 1,
-    .version = "1.0.28-elite-name-color-path-arm64"
+    .version = "1.0.29-elite-loot-test-arm64"
 };
 
 static void init_mod(kernel_mod_handle_t *handle) {
@@ -33,7 +33,7 @@ static void init_mod(kernel_mod_handle_t *handle) {
     OR_ConfigIoReport config_report = {0};
     or_log_init(handle);
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=1.0.28-elite-name-color-path-arm64 versionCode=2026091028 stage=enter");
+           "[MODULE_BEACON] version=1.0.29-elite-loot-test-arm64 versionCode=2026091029 stage=enter");
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[ARCHITECTURE] core=pure-c metadata=TEFKernel-PatchLib "
            "lifecycle=SetDefaults-observe/AI-active-commit failPolicy=SAFE-OFF");
@@ -71,11 +71,11 @@ static void init_mod(kernel_mod_handle_t *handle) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "Verified mobile NPC hooks were not installable; gameplay overlay remains disabled");
     }
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=1.0.28-elite-name-color-path-arm64 gameplay=%s metadata=%s",
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=1.0.29-elite-loot-test-arm64 gameplay=%s metadata=%s",
            g_runtime.capabilities.gameplay_enabled ? "on" : "off",
            "PatchLib");
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=1.0.28-elite-name-color-path-arm64 versionCode=2026091028 stage=ready");
+           "[MODULE_BEACON] version=1.0.29-elite-loot-test-arm64 versionCode=2026091029 stage=ready");
 }
 
 static void cleanup_mod(kernel_mod_handle_t *handle) {

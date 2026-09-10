@@ -8,5 +8,5 @@
   "moneyBackend": "NPC.value-only",
   "itemRegistryRequired": true,
   "nativeExtraItemExecution": "disabled-until-NewItem-and-item-ids-verified",
-  "enableNativeExtraLoot": false
+  "enableNativeExtraLoot": true
 }
