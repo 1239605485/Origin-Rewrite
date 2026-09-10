@@ -59,7 +59,7 @@ target_include_directories(OriginRewrite
 target_compile_definitions(OriginRewrite PRIVATE
     ORIGINREWRITE_BUILDING=1
     BUILDING_DLL=1
-    ORIGINREWRITE_VERSION="1.0.31-v06-name-color-render-fix-arm64"
+    ORIGINREWRITE_VERSION="1.0.32-v06-elite-loot-special-ai-arm64"
 )
 
 if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")

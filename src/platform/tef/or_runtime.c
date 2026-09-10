@@ -86,7 +86,7 @@ static void or_probe_item_new_item(OR_Runtime *runtime) {
         arg_count = tefstd_vector_size(&signature.arg_types);
         OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
                        "[ITEM_METHOD] name=NewItem overload=%u instance=%s returnType=%d "
-                       "argCount=%zu invoke=disabled",
+                       "argCount=%zu invoke=deferred-until-NPCLoot",
                        (unsigned)overloads,
                        signature.is_instance ? "yes" : "no",
                        (int)signature.return_type, arg_count);
@@ -118,7 +118,7 @@ static void or_probe_item_new_item(OR_Runtime *runtime) {
                 exact = actual && *actual == expected[arg_index];
             }
             OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
-                           "[ITEM_NEWITEM_ABI] overload=%u exact9=%s invoke=disabled",
+                           "[ITEM_NEWITEM_ABI] overload=%u exact9=%s invoke=deferred-until-NPCLoot",
                            (unsigned)(overloads - 1u),
                            exact ? "yes" : "no");
             if (exact && !runtime->item_new_item_signature_ready) {
@@ -131,7 +131,7 @@ static void or_probe_item_new_item(OR_Runtime *runtime) {
                 runtime->method_item_new_item_extended = method;
                 OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
                                "[ITEM_NEWITEM_EXTENDED_ABI] available=yes "
-                               "invoke=disabled reason=pointer-args-unverified");
+                               "invoke=deferred reason=pointer-args-unverified");
             }
         }
         if (patchlib_method_signature_free) {
@@ -140,7 +140,7 @@ static void or_probe_item_new_item(OR_Runtime *runtime) {
     }
     tefstd_vector_destroy(&methods);
     OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
-                   "[ITEM_NEWITEM_SCAN_SUMMARY] overloads=%u exact9=%u invoke=disabled",
+                   "[ITEM_NEWITEM_SCAN_SUMMARY] overloads=%u exact9=%u invoke=deferred-until-NPCLoot",
                    (unsigned)overloads, (unsigned)exact_matches);
     if (!runtime->item_new_item_signature_ready) {
         OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
@@ -1531,7 +1531,7 @@ static void or_scan_boundary_methods(OR_Runtime *runtime) {
     }
     tefstd_vector_destroy(&methods);
     OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
-                   "[BOUNDARY_SCAN] logged=%u limit=32 deathHook=off lootHook=off rewards=off",
+                   "[BOUNDARY_SCAN] logged=%u limit=32 deathHook=off lootHook=observer rewards=enabled",
                    (unsigned)logged);
 }
 

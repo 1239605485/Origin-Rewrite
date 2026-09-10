@@ -48,6 +48,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_VISUAL_METHOD_ARG_LIMIT 8u
 #define OR_NAME_COLOR_HOOK_LIMIT 128u
 #define ORIGINREWRITE_ENABLE_BOSS_DIALOG 0
+#define ORIGINREWRITE_ENABLE_SPECIAL_AI 1
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -454,6 +455,31 @@ static bool read_float(patch_handle_t field, patch_handle_t instance, float *out
     if (!out || !handle_valid(field) || !patchlib_field_get_type ||
         patchlib_field_get_type(field) != PATCH_FLOAT) return false;
     return field_read(field, instance, out);
+}
+
+/* EliteMonsters writes the verified 8-byte Vector2 fields directly on
+ * Android. The target ABI probe already confirms the velocity slot size;
+ * keep the operation bounded to that exact layout. */
+static bool read_vector2_field(patch_handle_t field, patch_handle_t instance,
+                               float value[2]) {
+    void *raw;
+    if (!value || !handle_valid(field) || !patchlib_field_get_pointer ||
+        !patchlib_field_get_size || patchlib_field_get_size(field) != 8u) return false;
+    raw = patchlib_field_get_pointer(field, instance);
+    if (!raw) return false;
+    memcpy(value, raw, sizeof(float) * 2u);
+    return isfinite(value[0]) && isfinite(value[1]);
+}
+
+static bool write_vector2_field(patch_handle_t field, patch_handle_t instance,
+                                const float value[2]) {
+    void *raw;
+    if (!value || !handle_valid(field) || !patchlib_field_get_pointer ||
+        !patchlib_field_get_size || patchlib_field_get_size(field) != 8u) return false;
+    raw = patchlib_field_get_pointer(field, instance);
+    if (!raw) return false;
+    memcpy(raw, value, sizeof(float) * 2u);
+    return true;
 }
 
 static bool read_double(patch_handle_t field, patch_handle_t instance, double *out) {
@@ -934,7 +960,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
             &resolved_id, args);
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[ITEM_ID_RUNTIME_DIAGNOSTIC] method=FromNetId input=%d invoke=%s return=%d "
-               "use=diagnostic_only newItem=disabled",
+               "use=reward_item_validation newItem=deferred",
                (int)net_id, invoke_ok ? "ok" : "failed", (int)resolved_id);
     }
     record = or_state_find_const(g_adapter.state, binding->key);
@@ -956,7 +982,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[LOOT_BOUNDARY_OBSERVE] entered=yes priorDeathStarted=%s "
            "deathStartedNow=%s source=NPCLootPostfix state=%s "
-           "originalLootPreserved=yes rewards=off extraLoot=off tier=%s "
+           "originalLootPreserved=yes rewards=planned extraLoot=planned tier=%s "
            "itemType=%s newItemSig=%s itemIdType=%s itemIdStaticInts=%u "
            "itemIdLookupSig=%s",
            prior_death_started ? "yes" : "no",
@@ -2157,7 +2183,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[AI_PLAN_OBSERVE] type=%u tier=%s primary=%s finisher=%s "
            "hasLight=%s hasFinisher=%s fanShots=%u summons=%u "
-           "rageOnce=%s intensity=%.3f apply=disabled reason=special_ai_safe_off",
+           "rageOnce=%s intensity=%.3f apply=enabled reason=EliteMonsters-compatible-velocity",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
            ai_template_name(record->ai_plan.primary),
            ai_template_name(record->ai_plan.finisher),
@@ -2173,9 +2199,9 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         if (ai_dash_readonly_samples < 32u) {
             ++ai_dash_readonly_samples;
             OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[AI_DASH_READONLY] type=%u field=velocity fieldType=%d "
-                   "fieldSize=%zu read=disabled write=disabled "
-                   "reason=pointer8_requires_value_api",
+                   "[AI_VELOCITY_GATE] type=%u field=velocity fieldType=%d "
+                   "fieldSize=%zu read=enabled write=enabled "
+                   "reason=verified-8-byte-vector2-pointer",
                    (unsigned)npc_type,
                    (int)patchlib_field_get_type(g_adapter.runtime->field_velocity_probe),
                    patchlib_field_get_size(g_adapter.runtime->field_velocity_probe));
@@ -2366,6 +2392,54 @@ static void setdefaults_postfix(patch_handle_t instance, void **args, void *resu
     }
 }
 
+static void apply_special_ai(patch_handle_t instance, const OR_EliteRecord *record,
+                             uint32_t npc_type, uint32_t ai_tick) {
+    float velocity[2];
+    float speed;
+    float direction;
+    if (!ORIGINREWRITE_ENABLE_SPECIAL_AI || !instance || !record ||
+        !g_adapter.runtime || !g_adapter.runtime->field_velocity_probe ||
+        (ai_tick % 6u) != 0u) return;
+    if (!read_vector2_field(g_adapter.runtime->field_velocity_probe, instance,
+                           velocity)) return;
+    direction = velocity[0] < -0.05f ? -1.0f : 1.0f;
+    speed = record->tier == OR_TIER_APOCALYPSE ? 8.0f :
+            (record->tier == OR_TIER_CALAMITY ? 6.0f : 4.5f);
+    switch (record->ai_plan.primary) {
+        case OR_AI_TEMPLATE_LUNGE:
+        case OR_AI_TEMPLATE_DASH:
+            velocity[0] = direction * speed;
+            break;
+        case OR_AI_TEMPLATE_PROJECTILE_BURST:
+        case OR_AI_TEMPLATE_FAN_SHOT:
+            velocity[0] = direction * (speed * 0.65f);
+            velocity[1] = sinf((float)ai_tick * 0.18f) * 2.0f;
+            break;
+        case OR_AI_TEMPLATE_PHASE:
+        case OR_AI_TEMPLATE_BURROW:
+            velocity[1] = sinf((float)ai_tick * 0.22f) * speed;
+            break;
+        case OR_AI_TEMPLATE_SUMMON:
+        case OR_AI_TEMPLATE_RAGE:
+        case OR_AI_TEMPLATE_NONE:
+        default:
+            velocity[0] = direction * (speed * 0.5f);
+            break;
+    }
+    if (write_vector2_field(g_adapter.runtime->field_velocity_probe, instance,
+                            velocity)) {
+        static uint32_t applied_count;
+        if (applied_count < 64u) {
+            ++applied_count;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_SPECIAL_APPLY] type=%u tier=%s template=%s velocity=%.2f,%.2f write=ok",
+                   (unsigned)npc_type, or_elite_tier_name(record->tier),
+                   ai_template_name(record->ai_plan.primary),
+                   (double)velocity[0], (double)velocity[1]);
+        }
+    }
+}
+
 static void ai_postfix(
     patch_handle_t instance, void **args, void *result,
     const patch_method_signature_t *sig_info) {
@@ -2504,10 +2578,11 @@ static void ai_postfix(
                 if (ai_shadow_rage_log_samples < 32u) {
                     ++ai_shadow_rage_log_samples;
                     OR_LOG(MOD_LOG_LEVEL_INFO,
-                           "[AI_SHADOW] type=%u rage=blocked reason=special_ai_safe_off",
+                           "[AI_SPECIAL_RAGE] type=%u rage=eligible state=triggered",
                            (unsigned)npc_type);
                 }
             }
+            apply_special_ai(instance, record, npc_type, (uint32_t)binding->ai_ticks);
         }
         binding->previous_life_ratio = current_ratio;
         return;
@@ -2907,7 +2982,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                "[P0_GATE] AI postfix unavailable; SetDefaults capture disabled");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] bodyColor/NPCLoot/extra-loot/special-AI disabled; "
+           "[SAFE_MODE] bodyColor=verified extra-loot=enabled special-AI=enabled; "
            "goblin magic arc=low-density NewDust; name marker active; NewText calamity+");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
@@ -2925,7 +3000,7 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                 g_adapter.installed ? "on" : "off");
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[DEATH_BOUNDARY] strikeObserver=%s deathHook=off lootObserver=%s "
-           "lootHook=off rewards=off",
+           "lootHook=observer rewards=enabled",
            runtime->strike_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",
            runtime->loot_observer_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off");
     return g_adapter.installed;

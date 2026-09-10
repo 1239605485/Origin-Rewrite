@@ -109,7 +109,7 @@ void or_config_default(OR_Config *config) {
 
     config->eligibility = (OR_EligibilityConfig){false, false, false, false, false};
     /* v0.6 allows one verified native crate/material/equipment reward slot. */
-    config->loot = (OR_LootConfig){0.20f, true, 1u, false};
+    config->loot = (OR_LootConfig){0.20f, true, 1u, true};
     config->caps = (OR_Caps){0.75f, 1.25f, 4, 1.25f, 15.0f, 2.0f, 1.50f, 1.20f, 0.90f};
 }
 
