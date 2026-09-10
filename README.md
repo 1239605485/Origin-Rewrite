@@ -1,19 +1,19 @@
-# OriginRewrite｜起源重构 PatchLib 架构版
+# OriginRewrite｜起源重构 v1.0 正式版
 
-`1.0.0-patchlib-architecture` 是基于设计规范 v1.0 重建的 Android ARM64 KernelLoader 模组。
-工程只使用 TEFKernel PatchLib 做 IL2CPP 元数据定位与 Hook，并把概率、属性、规则、状态与奖励决策保留在可测试的纯 C 核心。
-Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决策保留在可测试的纯 C 核心。
+起源重构在保留泰拉瑞亚原版节奏的基础上，为世界加入“逐步失衡”的战斗规则：怪物会按世界阶段转化为异化体、灾变体或终焉体；世界会随机形成一组记忆中的规则；玩家进入不同地形、遭遇不同天气时，后续出现的重构体也会随之改变。
 
-## 架构
+本模组面向 Terraria 手机版 1.4.x 的 Android ARM64 平台，仅支持单机。它只使用 TEFKernel PatchLib 与 C11 规则核心；不替换原版掉落表、不额外造币，也不依赖 BNM。
 
-| 层 | 职责 | 失败策略 |
-|---|---|---|
-| `src/core` | 概率、进度、三档层级、属性、规则、AI 状态机、奖励策略、实例生命周期 | 不依赖游戏运行时，可独立测试 |
-| `src/platform/tef` | PatchLib ABI 探测、字段/方法访问、Hook、公告、日志和配置 | 每项能力独立降级 |
-| `src/platform/tef` | PatchLib ABI 探测、Prefix/Postfix Hook、公告、日志、配置读取和死亡后绑定清理 | 每项能力独立降级 |
-| `src/entry` | KernelLoader `create_kernel_mod()` 入口与组合根 | 不满足 P0 门槛时不启用生成改写 |
+## 核心功能
 
-启动时仅通过 TEFKernel PatchLib 探测目标类、字段和精确方法签名；任一关键接口不匹配时，相关功能安全关闭并保留原版行为。
+| 系统 | 内容 |
+|---|---|
+| 三档重构体 | 异化体、灾变体、终焉体拥有随世界进度增长的生命、伤害、防御、体型与奖励档位。 |
+| 世界规则 | 进入世界随机抽取 2–4 条规则，每 3 个游戏日重新抽取，并在本次会话中保留规则记忆。 |
+| 地形与天气 | 地形、天气与昼夜会影响后续重构体的快照与兼容能力。 |
+| 怪物 AI | 近战、远程、飞行、蠕虫与特殊单位获得冲锋、俯冲、远射、召唤、相位或狂暴等兼容动作。 |
+| 掉落奖励 | 原版掉落和金币完整保留；重构体最多追加一个按当前阶段白名单挑选的奖励槽。 |
+| 中文播报 | 重构体、世界规则、地形与天气均使用独立的显眼淡色中文播报。 |
 
 ## 已实现的核心行为
 
@@ -42,11 +42,9 @@ Hook 所有者，并把概率、属性、规则、AI 预算、状态与奖励决
 回读同时匹配，Android 数组不可读时使用已验证的 `NewItem` 返回槽位作为兼容验证；调用
 失败或返回无效槽位时保留原版掉落且不伪造额外奖励成功。
 
-名称颜色使用 `GivenOrTypeName`/`FullName` 实际显示路径登记名称，再在目标
-`Main.MouseText` 的已验证签名中映射到原版稀有度色板；同时保留原名和带前缀名称，兼容
-不同移动版渲染器传入的文本形式。播报文本还带有 Terraria 原生 `[c/色值:文本]` 标记，
-避免部分版本忽略 `Color` 结构体参数时所有播报变成同一种颜色。NPC 身体 `color` 写入和
-特殊 AI 已开放位移、投射物、召唤和相位免伤动作，并在启动日志输出各工厂的解析结果。
+名称前缀保留原名并登记显示路径；播报文本还带有 Terraria 原生 `[c/色值:文本]` 标记，
+避免部分版本忽略 `Color` 结构体参数时所有播报变成同一种颜色。特殊 AI 已开放位移、
+投射物、召唤和相位免伤动作，并在启动日志输出各工厂的解析结果。
 
 播报颜色已按灾变体、终焉体、天气、地形、世界规则和 Boss 分组为显眼淡色，并会在日志
 中输出 `[BROADCAST_COLOR]` 方便真机核对。GitHub Actions 工作流位于
@@ -69,7 +67,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk-r26c
 bash scripts/package_android_arm64.sh
 ```
 
-产物 `OriginRewrite-v1.0.38-v09-loot-pool-doc-cn-arm64.zip` 可直接导入
+产物 `OriginRewrite-v1.0.0.zip` 可直接导入
 TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目录。详细说明见
 [`BUILD_ANDROID.md`](BUILD_ANDROID.md)。
 
@@ -79,9 +77,6 @@ TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目�
 `OriginRewrite`：
 
 - `[UNITY_PROBE]`：读取到的 Unity 版本；
-- `[BNM_GATE]` / `[BNM_METADATA]`：BNM 是否通过门槛及字段/方法解析结果；
-- `[BNM_WRITE_AUTH]`：`defense` 每次写入后立即读回；`match=yes authority=BNM` 才由 BNM 保持接管，失败时必须看到 `fallback=PatchLib`；
-- `[BNM_WRITE_PROBE]`：`damage`、`lifeMax`、`life` 各最多 8 次写入后立即读回，仅用于 ABI 验证，正式写入仍由 PatchLib 完成；
 - `[ENTRY_PROBE]`：`SetDefaults`/`AI` 的精确 ABI；
 - `[ROLL]`：基础概率、规则后概率、抽取与提交结果；
 - `[OR_DIAG] stat_write`：计算值和写回读值；
@@ -91,5 +86,5 @@ TEFManager，ZIP 根目录就是 `Manifest.json`，不是再套一层源码目�
 
 ## 许可证
 
-本工程以 AGPL-3.0-or-later 发布。BNM 2.5.2、xDL 与 KernelLoader mod API 是
+本工程以 AGPL-3.0-or-later 发布。xDL 与 KernelLoader mod API 是
 MIT 许可组件，详见 `LICENSE`、`THIRD_PARTY_NOTICES.md` 及各 vendored 文件头。

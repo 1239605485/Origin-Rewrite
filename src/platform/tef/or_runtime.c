@@ -421,7 +421,11 @@ void or_runtime_probe_main_item_array(OR_Runtime *runtime) {
         runtime->main_item_field = field;
         field = PATCH_NULL;
     }
-    patchlib_field_get_value(field, NULL, &array);
+    /* When the handle is retained by runtime, read through that retained
+     * handle.  The old code nulled the local handle first and consequently
+     * made the startup probe report a false "array unavailable" result. */
+    patchlib_field_get_value(runtime->main_item_field ? runtime->main_item_field : field,
+                             NULL, &array);
     if (or_handle_is_valid(array) && patchlib_array_length) {
         length = patchlib_array_length(array);
     }

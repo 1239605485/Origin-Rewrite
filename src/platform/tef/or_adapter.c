@@ -99,6 +99,17 @@ typedef struct OR_NameColorHook {
     char text[256];
 } OR_NameColorHook;
 
+/*
+ * PatchLib returns a managed Int32 through an FFI return buffer.  Some mobile
+ * builds write an eight-byte native word even for an Int32 return.  Keeping
+ * the result in a naturally aligned eight-byte cell prevents a four-byte
+ * return write from corrupting the adjacent Item.NewItem height argument.
+ */
+typedef union OR_Int32ReturnCell {
+    uint64_t raw;
+    int32_t value;
+} OR_Int32ReturnCell;
+
 typedef struct OR_Adapter {
     OR_Runtime *runtime;
     OR_Config *config;
@@ -1153,6 +1164,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
         int32_t item_stack_arg = policy.item_stack;
         int32_t spawn_width = 0;
         int32_t spawn_height = 0;
+        OR_Int32ReturnCell result_cell = { .raw = UINT64_C(0x4f525f534c4f5455) };
         int32_t result_slot = -1;
         bool no_broadcast = true;
         int32_t prefix = 0;
@@ -1218,13 +1230,15 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
             args[8] = &ownership;
             call_ok = patchlib_method_invoke_args(
                 g_adapter.runtime->method_item_new_item, PATCH_NULL,
-                &result_slot, args);
+                &result_cell, args);
+            result_slot = result_cell.value;
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[ITEM_CALL_ARGS] phase=after invoke=%s x=%d y=%d width=%d height=%d "
-                   "type=%d stack=%d resultSlot=%d",
+                   "type=%d stack=%d resultSlot=%d returnRaw=%016llx",
                    call_ok ? "ok" : "failed", (int)x, (int)y,
                    (int)spawn_width, (int)spawn_height, (int)item_type_arg,
-                   (int)item_stack_arg, (int)result_slot);
+                   (int)item_stack_arg, (int)result_slot,
+                   (unsigned long long)result_cell.raw);
             if (call_ok && result_slot >= 0 && g_adapter.runtime->main_item_field &&
                 g_adapter.runtime->item_field_type && patchlib_array_at &&
                 patchlib_field_get_value) {
@@ -2503,9 +2517,10 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                notice_requested ? (notice_ok ? "yes" : "no") : "skip");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[AI_MODE] bodyColor=enabled loot=verified-call-with-writeback-check "
+           "[AI_MODE] colorMarker=%s loot=return-buffer-guarded-writeback-check "
            "specialAI=full-factory-actions; goblin magic arc=low-density NewDust; "
-           "name marker active; NewText notice enabled for calamity+");
+           "name marker active; NewText notice enabled for calamity+",
+           g_adapter.runtime->capabilities.color_marker_ready ? "enabled" : "safe-off");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: concept=重构体 prefix=%s type=%u tier=%s progress=%s mode=%s",
            tier_prefix(spawn.tier) ? tier_prefix(spawn.tier) : "unavailable",
            (unsigned)npc_type, or_elite_tier_name(spawn.tier),
@@ -3529,8 +3544,9 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                "[P0_GATE] AI postfix unavailable; SetDefaults capture disabled");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] bodyColor=verified extra-loot=enabled special-AI=enabled; "
-           "goblin magic arc=low-density NewDust; name marker active; NewText calamity+");
+           "[SAFE_MODE] colorMarker=%s extra-loot=enabled special-AI=enabled; "
+           "goblin magic arc=low-density NewDust; name marker active; NewText calamity+",
+           runtime->capabilities.color_marker_ready ? "enabled" : "safe-off");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
     /* This is the verified NPCLoot observation boundary. A separate

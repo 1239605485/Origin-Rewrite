@@ -35,6 +35,10 @@ static bool emit_spawn_offset(const OR_Runtime *runtime,
 #if !defined(__ANDROID__)
     (void)runtime;
     (void)instance;
+    (void)offset_x;
+    (void)offset_y;
+    (void)speed_x;
+    (void)speed_y;
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[VISUAL_EFFECT_SKIP] type=%u tier=%s effect=NewDust "
            "reason=android_value_invoke_only",
