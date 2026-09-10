@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#define OR_WORLD_RULE_REFRESH_DAYS 3u
+
 static bool or_saved_snapshot_valid(const OR_RuleSnapshot *snapshot) {
     size_t i;
     uint32_t selected_mask = 0u;
@@ -53,6 +55,49 @@ OR_WorldRuleStateStatus or_world_rules_create(OR_WorldRuleState *state,
         return OR_WORLD_RULES_DISABLED_SAFE_MODE;
     }
     state->initialized = true;
+    state->refresh_count = 0u;
+    state->last_refresh_day = 0u;
+    state->next_refresh_day = OR_WORLD_RULE_REFRESH_DAYS;
+    state->history_count = 0u;
+    return OR_WORLD_RULES_VALID;
+}
+
+OR_WorldRuleStateStatus or_world_rules_refresh(OR_WorldRuleState *state,
+                                               const OR_Config *config,
+                                               OR_ProgressStage progress,
+                                               OR_TerrainSnapshot terrain,
+                                               OR_Weather weather,
+                                               bool is_night,
+                                               uint64_t game_day) {
+    OR_RuleSnapshot next_snapshot;
+    OR_WorldRuleHistoryEntry *history;
+    uint64_t next_seed;
+    uint32_t history_index;
+    if (!state || !config || !state->initialized || state->disabled_safe_mode ||
+        game_day < state->next_refresh_day) {
+        return state && state->initialized && !state->disabled_safe_mode
+            ? OR_WORLD_RULES_VALID : OR_WORLD_RULES_INVALID_INPUT;
+    }
+    next_seed = state->rule_seed ^
+        (game_day * UINT64_C(0x9e3779b97f4a7c15)) ^
+        ((state->refresh_count + 1u) * UINT64_C(0xbf58476d1ce4e5b9));
+    if (!or_rules_build_snapshot(config, progress, terrain, weather, is_night,
+                                 next_seed, &next_snapshot)) {
+        return OR_WORLD_RULES_DISABLED_SAFE_MODE;
+    }
+    history_index = state->history_count % OR_WORLD_RULE_HISTORY_LIMIT;
+    history = &state->history[history_index];
+    history->effective_day = state->last_refresh_day;
+    history->revision = state->refresh_count + 1u;
+    history->snapshot = state->snapshot;
+    if (state->history_count < OR_WORLD_RULE_HISTORY_LIMIT) {
+        state->history_count += 1u;
+    }
+    state->snapshot = next_snapshot;
+    state->rule_seed = next_seed;
+    state->refresh_count += 1u;
+    state->last_refresh_day = game_day;
+    state->next_refresh_day = game_day + OR_WORLD_RULE_REFRESH_DAYS;
     return OR_WORLD_RULES_VALID;
 }
 

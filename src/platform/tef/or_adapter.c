@@ -47,6 +47,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_VISUAL_MEMBER_LIMIT 64u
 #define OR_VISUAL_METHOD_ARG_LIMIT 8u
 #define OR_NAME_COLOR_HOOK_LIMIT 128u
+#define OR_TERRARIA_TICKS_PER_DAY 86400u
 #define ORIGINREWRITE_ENABLE_BOSS_DIALOG 0
 #define ORIGINREWRITE_ENABLE_SPECIAL_AI 1
 
@@ -127,6 +128,13 @@ typedef struct OR_Adapter {
     OR_BroadcastState broadcast;
     OR_WorldRuleState world_rules;
     uint64_t world_rules_session;
+    uint64_t world_rule_revision;
+    uint64_t world_clock_session;
+    uint64_t world_clock_start_tick;
+    uint64_t game_day_counter;
+    double last_world_time;
+    bool last_day_time;
+    bool world_clock_initialized;
     OR_PlayerRuleAdapter player_rules;
     uint64_t last_player_rule_poll_tick;
     uint64_t ai_factory_tick;
@@ -149,12 +157,20 @@ static uint32_t g_batch_drop_index;
 
 static bool host_authority(bool *single_player, bool *known);
 static uint64_t update_tick(void);
+static OR_ProgressStage current_progress(void);
 static const char *biome_name(OR_BiomeTag biome);
 static const char *special_name(OR_SpecialLocationTag special);
 static const char *terrain_depth_name(OR_DepthTag depth);
 static void capture_world_context(patch_handle_t instance, OR_TerrainSnapshot *terrain,
                                   OR_Weather *weather, bool *is_night);
 static uint64_t world_session_id(void);
+static uint64_t read_game_day(void);
+static void ensure_world_rules(OR_ProgressStage progress,
+                               OR_TerrainSnapshot terrain,
+                               OR_Weather weather,
+                               bool is_night,
+                               uint64_t session,
+                               uint64_t game_day);
 
 static void remember_name_color(const char *text, OR_EliteTier tier) {
     size_t i;
@@ -212,43 +228,61 @@ static void observe_player_rules(patch_handle_t instance) {
             g_adapter.world_bootstrap_emitted = false;
             g_adapter.rule_summary_emitted = false;
             or_player_rule_adapter_init(&g_adapter.player_rules);
-            or_world_rule_state_init(&g_adapter.world_rules);
             /* Broadcast deduplication is session-scoped. A returning player
-             * must receive bootstrap notices again even when keys match. */
+             * must receive current-world notices again even when keys match.
+             * World rules themselves belong to the world session, not to the
+             * managed-player object, so they intentionally remain in memory. */
             or_broadcast_init(&g_adapter.broadcast);
-            OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_SESSION_CHANGE] playerChanged=yes reset=rule_bootstrap");
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[WORLD_SESSION_CHANGE] playerChanged=yes reset=bootstrap preserve=world_rule_memory");
         }
     }
     /* NPC.AI invokes this observer once per NPC. Use LocalPlayer as the only
      * terrain source so NPC positions cannot alternate surface/cavern notices. */
     if (!player_identity) return;
     capture_world_context(player_identity, &terrain, &weather, &night);
+    {
+        uint64_t game_day = read_game_day();
+        ensure_world_rules(current_progress(), terrain, weather, night,
+                           world_session_id(), game_day);
+    }
     /* Keep one authoritative terrain snapshot for all NPC lifecycle paths.
      * SetDefaults/AI may run for many NPCs at different coordinates; those
      * coordinates must never drive player-facing terrain rules. */
     g_adapter.last_player_terrain = terrain;
     g_adapter.last_player_terrain_valid = true;
-    if (or_player_rule_adapter_on_context(&g_adapter.player_rules, terrain)) {
+    {
         bool world = false;
+        bool summary = false;
         bool terrain_notice = false;
+        bool terrain_changed = or_player_rule_adapter_on_context(&g_adapter.player_rules,
+                                                                  terrain);
         if (!g_adapter.world_bootstrap_emitted) {
             world = or_broadcast_emit_world(&g_adapter.broadcast, g_adapter.runtime,
                                             weather, night, world_session_id(), tick);
             if (world) g_adapter.world_bootstrap_emitted = true;
         }
-        terrain_notice = or_broadcast_emit_terrain(&g_adapter.broadcast,
-                                                   g_adapter.runtime, terrain,
-                                                   tick, tick);
         if (g_adapter.world_rules.initialized && !g_adapter.rule_summary_emitted) {
             if (or_broadcast_emit_rule_summary(&g_adapter.broadcast, g_adapter.runtime,
-                                               &g_adapter.world_rules.snapshot, tick))
+                                               &g_adapter.world_rules.snapshot,
+                                               g_adapter.world_rule_revision, tick))
                 g_adapter.rule_summary_emitted = true;
+            summary = g_adapter.rule_summary_emitted;
         }
+        if (terrain_changed) {
+            terrain_notice = or_broadcast_emit_terrain(&g_adapter.broadcast,
+                                                       g_adapter.runtime, terrain,
+                                                       tick, tick);
+        }
+        if (world || summary || terrain_changed) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[PLAYER_RULE_EVENT] depth=%s world=%s terrain=%s "
-               "source=local_player_stable_snapshot state=sampled_for_next_spawn",
-               terrain_depth_name(terrain.depth), world ? "yes" : "no",
-               terrain_notice ? "yes" : "dedup_or_cooldown");
+               "[PLAYER_RULE_EVENT] depth=%s biome=%s special=%s world=%s summary=%s "
+               "terrain=%s source=local_player_stable_snapshot state=sampled_for_next_spawn",
+               terrain_depth_name(terrain.depth), biome_name(terrain.biome),
+               special_name(terrain.special),
+               world ? "yes" : "no", summary ? "yes" : "no",
+               terrain_notice ? "yes" : (terrain_changed ? "dedup_or_cooldown" : "no"));
+        }
     }
 }
 
@@ -1389,6 +1423,103 @@ static uint64_t update_tick(void) {
     return ++g_adapter.fallback_tick;
 }
 
+static uint64_t read_game_day(void) {
+    uint64_t tick = update_tick();
+    uint64_t session = world_session_id();
+    bool day_time = true;
+    bool day_ok = false;
+    double world_time = 0.0;
+    bool time_ok = false;
+
+    if (g_adapter.runtime) {
+        day_ok = read_bool(g_adapter.runtime->main_day_time, NULL, &day_time);
+        time_ok = read_double(g_adapter.runtime->main_time, NULL, &world_time);
+    }
+    if (!g_adapter.world_clock_initialized || g_adapter.world_clock_session != session) {
+        g_adapter.world_clock_initialized = true;
+        g_adapter.world_clock_session = session;
+        g_adapter.world_clock_start_tick = tick;
+        g_adapter.game_day_counter = 0u;
+        g_adapter.last_day_time = day_time;
+        g_adapter.last_world_time = world_time;
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[WORLD_CLOCK] session=%llu day=0 source=%s time=%s:%0.1f",
+               (unsigned long long)session,
+               time_ok && day_ok ? "Main.time" : "update_tick_fallback",
+               time_ok ? "ok" : "unavailable", world_time);
+        return 0u;
+    }
+    if (day_ok && !g_adapter.last_day_time && day_time) {
+        g_adapter.game_day_counter += 1u;
+        OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_DAY_CHANGE] session=%llu day=%llu",
+               (unsigned long long)session,
+               (unsigned long long)g_adapter.game_day_counter);
+    } else if (!day_ok && tick >= g_adapter.world_clock_start_tick) {
+        uint64_t fallback_day =
+            (tick - g_adapter.world_clock_start_tick) / OR_TERRARIA_TICKS_PER_DAY;
+        if (fallback_day > g_adapter.game_day_counter) {
+            g_adapter.game_day_counter = fallback_day;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[WORLD_DAY_CHANGE] session=%llu day=%llu source=update_tick_fallback",
+                   (unsigned long long)session,
+                   (unsigned long long)g_adapter.game_day_counter);
+        }
+    }
+    g_adapter.last_day_time = day_time;
+    if (time_ok) g_adapter.last_world_time = world_time;
+    return g_adapter.game_day_counter;
+}
+
+static void ensure_world_rules(OR_ProgressStage progress,
+                               OR_TerrainSnapshot terrain,
+                               OR_Weather weather,
+                               bool is_night,
+                               uint64_t session,
+                               uint64_t game_day) {
+    if (!g_adapter.config) return;
+    if (!g_adapter.world_rules.initialized ||
+        g_adapter.world_rules_session != session) {
+        OR_WorldRuleStateStatus status = or_world_rules_create(
+            &g_adapter.world_rules, g_adapter.config, progress, terrain, weather,
+            is_night, session, UINT64_C(0x4f52494700000022), session);
+        g_adapter.world_rules_session = session;
+        g_adapter.world_rule_revision = 1u;
+        g_adapter.rule_summary_emitted = false;
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[WORLD_RULES] session=%llu status=%d selected=%u revision=1 "
+               "gameDay=%llu source=seeded_snapshot memory=active",
+               (unsigned long long)session, (int)status,
+               (unsigned)g_adapter.world_rules.snapshot.selected_count,
+               (unsigned long long)game_day);
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[WORLD_RULE_MEMORY] session=%llu revision=1 history=%u "
+               "nextRefreshDay=%llu persistence=runtime_session",
+               (unsigned long long)session,
+               (unsigned)g_adapter.world_rules.history_count,
+               (unsigned long long)g_adapter.world_rules.next_refresh_day);
+        return;
+    }
+    if (game_day >= g_adapter.world_rules.next_refresh_day) {
+        uint64_t old_revision = g_adapter.world_rule_revision;
+        OR_WorldRuleStateStatus status = or_world_rules_refresh(
+            &g_adapter.world_rules, g_adapter.config, progress, terrain, weather,
+            is_night, game_day);
+        if (status == OR_WORLD_RULES_VALID &&
+            g_adapter.world_rules.refresh_count + 1u > old_revision) {
+            g_adapter.world_rule_revision = g_adapter.world_rules.refresh_count + 1u;
+            g_adapter.rule_summary_emitted = false;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[WORLD_RULES_REFRESH] session=%llu gameDay=%llu revision=%llu "
+                   "selected=%u history=%u nextRefreshDay=%llu source=three_day_cycle",
+                   (unsigned long long)session, (unsigned long long)game_day,
+                   (unsigned long long)g_adapter.world_rule_revision,
+                   (unsigned)g_adapter.world_rules.snapshot.selected_count,
+                   (unsigned)g_adapter.world_rules.history_count,
+                   (unsigned long long)g_adapter.world_rules.next_refresh_day);
+        }
+    }
+}
+
 static bool host_authority(bool *single_player, bool *known) {
     int32_t net_mode = 0;
     if (single_player) *single_player = false;
@@ -2106,28 +2237,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.progress = progress;
     context.mode = mode;
     capture_world_context(instance, &context.terrain, &context.weather, &context.is_night);
-    if (!g_adapter.world_rules.initialized ||
-        g_adapter.world_rules_session != session) {
-        OR_WorldRuleStateStatus world_status = or_world_rules_create(
-            &g_adapter.world_rules, g_adapter.config, progress,
-            context.terrain, context.weather, context.is_night,
-            session, UINT64_C(0x4f52494700000022), session);
-        g_adapter.world_rules_session = session;
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[WORLD_RULES] session=%llu status=%d selected=%u source=seeded_snapshot",
-               (unsigned long long)session, (int)world_status,
-               (unsigned)g_adapter.world_rules.snapshot.selected_count);
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[SAVE_PROBE] session=%llu ruleSeed=%llu worldFingerprint=%llu "
-               "rulePoolVersion=%u saveFormatVersion=%u selected=%u "
-               "persistence=observe-only write=disabled",
-               (unsigned long long)session,
-               (unsigned long long)g_adapter.world_rules.rule_seed,
-               (unsigned long long)g_adapter.world_rules.world_seed_fingerprint,
-               (unsigned)g_adapter.world_rules.rule_pool_version,
-               (unsigned)g_adapter.world_rules.save_format_version,
-               (unsigned)g_adapter.world_rules.snapshot.selected_count);
-    }
+    ensure_world_rules(progress, context.terrain, context.weather, context.is_night,
+                       session, read_game_day());
     if (g_adapter.world_rules.initialized &&
         !g_adapter.world_rules.disabled_safe_mode) {
         context.has_saved_world_rules = true;

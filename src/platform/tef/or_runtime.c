@@ -2353,6 +2353,7 @@ bool or_runtime_probe(OR_Runtime *runtime) {
     static const char *const hard_mode_names[] = {"hardMode", "HardMode"};
     static const char *const update_count_names[] = {"GameUpdateCount", "gameUpdateCount"};
     static const char *const day_time_names[] = {"dayTime"};
+    static const char *const time_names[] = {"time"};
     static const char *const blood_moon_names[] = {"bloodMoon"};
     static const char *const raining_names[] = {"raining"};
     static const char *const sandstorm_names[] = {"sandStorm", "sandstorm", "sandStormActive"};
@@ -2447,6 +2448,9 @@ bool or_runtime_probe(OR_Runtime *runtime) {
         runtime->main_day_time = or_resolve_field_any(
             main_type, day_time_names, sizeof(day_time_names) / sizeof(day_time_names[0]),
             false, PATCH_BOOL, sizeof(bool));
+        runtime->main_time = or_resolve_field_any(
+            main_type, time_names, sizeof(time_names) / sizeof(time_names[0]),
+            false, PATCH_DOUBLE, sizeof(double));
         runtime->main_blood_moon = or_resolve_field_any(
             main_type, blood_moon_names, sizeof(blood_moon_names) / sizeof(blood_moon_names[0]),
             false, PATCH_BOOL, sizeof(bool));
@@ -2645,6 +2649,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->main_world_id);
     or_release_handle(runtime->main_update_count);
     or_release_handle(runtime->main_day_time);
+    or_release_handle(runtime->main_time);
     or_release_handle(runtime->main_blood_moon);
     or_release_handle(runtime->main_raining);
     or_release_handle(runtime->main_sandstorm);

@@ -106,6 +106,7 @@ typedef struct OR_Runtime {
     patch_handle_t main_world_id;
     patch_handle_t main_update_count;
     patch_handle_t main_day_time;
+    patch_handle_t main_time;
     patch_handle_t main_blood_moon;
     patch_handle_t main_raining;
     patch_handle_t main_sandstorm;

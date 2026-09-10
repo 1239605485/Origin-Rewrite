@@ -26,6 +26,29 @@ static const char *terrain_special_name(OR_SpecialLocationTag special) {
     return special < OR_SPECIAL_COUNT ? names[special] : "";
 }
 
+static const char *progress_stage_name_zh(OR_ProgressStage stage) {
+    static const char *const names[] = {
+        "起源稳定期", "深层扰动期", "生命重构期", "起源崩解期", "终局重构期"
+    };
+    return stage < OR_PROGRESS_COUNT ? names[stage] : "未知阶段";
+}
+
+static const char *weather_name_zh(OR_Weather weather) {
+    static const char *const names[] = {
+        "晴朗", "降雨", "沙尘暴", "暴雪", "日食", "血月", "南瓜月", "霜月",
+        "史莱姆雨", "大风"
+    };
+    return weather < OR_WEATHER_COUNT ? names[weather] : "未知天气";
+}
+
+static const char *world_rule_name_zh(uint32_t rule_id) {
+    static const char *const names[] = {
+        "重构潮汐", "强敌世界", "丰收契约", "暴风边境", "夜行法则",
+        "深渊回响", "邪恶侵染", "玻璃炮"
+    };
+    return rule_id < OR_RULE_COUNT ? names[rule_id] : "未知规则";
+}
+
 static const char *tier_prefix(OR_EliteTier tier) {
     switch (tier) {
     case OR_TIER_APOCALYPSE: return "终焉体";
@@ -276,7 +299,7 @@ bool or_broadcast_emit_terrain(OR_BroadcastState *state,
                "[TERRAIN_BROADCAST_SKIP] reason=cooldown key=%u", (unsigned)key);
         return false;
     }
-    count = snprintf(message, sizeof(message), "起源回响：%s·%s%s",
+    count = snprintf(message, sizeof(message), "地形规则：已进入%s·%s%s，当前区域规则已生效",
                      terrain_depth_name(terrain.depth), terrain_biome_name(terrain.biome),
                      special[0] != '\0' ? special : "");
     if (count < 0 || count >= (int)sizeof(message)) return false;
@@ -332,7 +355,7 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
         OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_BROADCAST_SKIP] reason=cooldown key=%u", (unsigned)key);
         return false;
     }
-    weather_name = or_weather_name(weather);
+    weather_name = weather_name_zh(weather);
     count = snprintf(message, sizeof(message), "起源律动：%s·%s",
                      is_night ? "夜晚" : "白昼", weather_name);
     if (count < 0 || count >= (int)sizeof(message)) return false;
@@ -361,6 +384,7 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
 bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
                                     const OR_Runtime *runtime,
                                     const OR_RuleSnapshot *snapshot,
+                                    uint64_t rule_revision,
                                     uint64_t now_tick) {
     (void)now_tick;
     char message[256];
@@ -375,25 +399,27 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
         !patchlib_string_create || !patchlib_method_invoke_args) return false;
     {
         uint64_t key = ((uint64_t)snapshot->active_mask << 32) |
-                       (uint64_t)snapshot->progress;
+                       ((uint64_t)snapshot->progress << 24) |
+                       (rule_revision & UINT64_C(0xFFFFFF));
         if (state->last_rule_summary_key == key) return false;
     }
-    used = snprintf(message, sizeof(message), "起源规则：%s；倍率 生命%.2f 伤害%.2f 防御%.2f",
-                    or_progress_stage_name(snapshot->progress),
-                    (double)snapshot->life_multiplier,
-                    (double)snapshot->damage_multiplier,
-                    (double)snapshot->defense_multiplier);
+    used = snprintf(message, sizeof(message), "起源规则：%s；本轮规则：",
+                    progress_stage_name_zh(snapshot->progress));
     if (used < 0 || used >= (int)sizeof(message)) return false;
     for (i = 0u; i < snapshot->selected_count && i < OR_MAX_WORLD_RULES; ++i) {
         size_t len = strlen(message);
         int n = snprintf(message + len, sizeof(message) - len, "%s%s",
-                         i == 0u ? "(" : ",", or_world_rule_name(snapshot->selected_ids[i]));
+                         i == 0u ? "" : "、", world_rule_name_zh(snapshot->selected_ids[i]));
         if (n < 0 || (size_t)n >= sizeof(message) - len) return false;
     }
-    if (snapshot->selected_count < OR_MAX_WORLD_RULES) {
+    {
         size_t len = strlen(message);
-        if (len + 2u >= sizeof(message)) return false;
-        message[len] = ')'; message[len + 1u] = '\0';
+        int n = snprintf(message + len, sizeof(message) - len,
+                         "；倍率 生命%.2f 伤害%.2f 防御%.2f",
+                         (double)snapshot->life_multiplier,
+                         (double)snapshot->damage_multiplier,
+                         (double)snapshot->defense_multiplier);
+        if (n < 0 || (size_t)n >= sizeof(message) - len) return false;
     }
     if (!wrap_chat_color(message, sizeof(message), channel_hex("world_rule"))) return false;
     text = patchlib_string_create(message); if (!text) return false;
@@ -403,8 +429,11 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
            (unsigned)rgba[3]);
     if (!invoke_new_text(runtime, text, rgba, force, &ignored)) return false;
     state->last_rule_summary_key = ((uint64_t)snapshot->active_mask << 32) |
-                                   (uint64_t)snapshot->progress;
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[RULE_SUMMARY_BROADCAST] stage=%s rules=%u", or_progress_stage_name(snapshot->progress), (unsigned)snapshot->selected_count);
+                                   ((uint64_t)snapshot->progress << 24) |
+                                   (rule_revision & UINT64_C(0xFFFFFF));
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[RULE_SUMMARY_BROADCAST] stage=%s revision=%llu rules=%u",
+           progress_stage_name_zh(snapshot->progress), (unsigned long long)rule_revision,
+           (unsigned)snapshot->selected_count);
     return true;
 }
 

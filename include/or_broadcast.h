@@ -45,6 +45,7 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
 bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
                                     const OR_Runtime *runtime,
                                     const OR_RuleSnapshot *snapshot,
+                                    uint64_t rule_revision,
                                     uint64_t now_tick);
 bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *runtime,
                                    uint32_t npc_type, OR_BossDialogEvent event,

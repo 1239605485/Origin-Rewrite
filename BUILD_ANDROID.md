@@ -20,7 +20,7 @@ bash scripts/package_android_arm64.sh
 ## 安装包布局
 
 ```text
-OriginRewrite-v1.0.35-v06-flying-dive-world-environment-arm64.zip
+OriginRewrite-v1.0.36-v07-world-rule-cycle-cn-arm64.zip
 ├── Manifest.json
 ├── Info.json
 ├── OriginRewrite.json
