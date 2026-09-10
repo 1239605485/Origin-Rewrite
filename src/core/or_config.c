@@ -36,11 +36,11 @@ static void or_set_progress(OR_ProgressConfig *progress,
 
 void or_config_default(OR_Config *config) {
     static const float pre_weights[OR_MODE_COUNT][OR_TIER_COUNT] = {
-        {0.0f, 0.776699f, 0.194175f, 0.029126f},
-        {0.0f, 0.776699f, 0.194175f, 0.029126f},
-        {0.0f, 0.776699f, 0.194175f, 0.029126f},
-        {0.0f, 0.776699f, 0.194175f, 0.029126f},
-        {0.0f, 0.776699f, 0.194175f, 0.029126f}
+        {0.0f, 0.75f, 0.25f, 0.0f},
+        {0.0f, 0.75f, 0.25f, 0.0f},
+        {0.0f, 0.75f, 0.25f, 0.0f},
+        {0.0f, 0.75f, 0.25f, 0.0f},
+        {0.0f, 0.75f, 0.25f, 0.0f}
     };
     static const float hard_weights[OR_MODE_COUNT][OR_TIER_COUNT] = {
         {0.0f, 0.75f, 0.20f, 0.05f},
@@ -77,14 +77,12 @@ void or_config_default(OR_Config *config) {
     config->allow_pre_hardmode_apocalypse = false;
     config->apocalypse_only_test = false;
 
-    /* Formal base probability is about 10.3% in every mode; tier weights
-     * split that roll into roughly 8% altered, 2% calamity, and 0.3%
-     * apocalypse. Journey uses classic attributes and probability. */
-    config->modes[OR_MODE_CLASSIC] = (OR_ModeConfig){0.103f, 1.00f, 1.00f, 1.00f, 0.00f};
-    config->modes[OR_MODE_EXPERT] = (OR_ModeConfig){0.103f, 1.15f, 1.10f, 1.05f, 0.10f};
-    config->modes[OR_MODE_MASTER] = (OR_ModeConfig){0.103f, 1.35f, 1.25f, 1.10f, 0.20f};
-    config->modes[OR_MODE_ZENITH] = (OR_ModeConfig){0.103f, 1.60f, 1.45f, 1.15f, 0.30f};
-    config->modes[OR_MODE_JOURNEY] = (OR_ModeConfig){0.103f, 1.00f, 1.00f, 1.00f, 0.00f};
+    /* v0.6 design baseline: 20/30/40/50 percent overall rewrite chance. */
+    config->modes[OR_MODE_CLASSIC] = (OR_ModeConfig){0.20f, 1.00f, 1.00f, 1.00f, 0.00f};
+    config->modes[OR_MODE_EXPERT] = (OR_ModeConfig){0.30f, 1.15f, 1.10f, 1.05f, 0.10f};
+    config->modes[OR_MODE_MASTER] = (OR_ModeConfig){0.40f, 1.35f, 1.25f, 1.10f, 0.20f};
+    config->modes[OR_MODE_ZENITH] = (OR_ModeConfig){0.50f, 1.60f, 1.45f, 1.15f, 0.30f};
+    config->modes[OR_MODE_JOURNEY] = (OR_ModeConfig){0.20f, 1.00f, 1.00f, 1.00f, 0.00f};
 
     config->tiers[OR_TIER_NONE] =
         (OR_TierConfig){false, 1.00f, 1.00f, 0.00f, 1.00f, 1.00f, 1.00f};
@@ -110,8 +108,8 @@ void or_config_default(OR_Config *config) {
                     stage_defense, stage_defense_endgame, 2.00f);
 
     config->eligibility = (OR_EligibilityConfig){false, false, false, false, false};
-    /* Crates stay opt-in until target-version item IDs/opening safety are verified. */
-    config->loot = (OR_LootConfig){0.20f, false, 1u, false};
+    /* v0.6 allows one verified native crate/material/equipment reward slot. */
+    config->loot = (OR_LootConfig){0.20f, true, 1u, false};
     config->caps = (OR_Caps){0.75f, 1.25f, 4, 1.25f, 15.0f, 2.0f, 1.50f, 1.20f, 0.90f};
 }
 

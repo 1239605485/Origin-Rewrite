@@ -1095,6 +1095,7 @@ void or_runtime_init(OR_Runtime *runtime) {
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id_alt = PATCH_HOOK_INVALID_ID;
+    runtime->display_name_hook_id_third = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }
@@ -1897,13 +1898,10 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
      * getter ABI. FullName is preferred, TypeName is an automatic fallback. */
     if (patchlib_type_get_property && patchlib_property_get_get_method &&
         patchlib_method_get_signature && tefstd_vector_size && tefstd_vector_at) {
-        /* The mobile build's NPC overhead-name path is based on
-         * GivenOrTypeName. FullName is kept as the next fallback because
-         * some builds expose only that property. This ordering mirrors the
-         * reference EliteMonsters hook and makes the name-color registry see
-         * the actual string used by the renderer. */
+        /* Install the same three getter hooks as EliteMonsters. The renderer
+         * may use any one of these paths depending on the Android build. */
         static const char *const display_names[] = {
-            "GivenOrTypeName", "FullName", "TypeName"
+            "FullName", "TypeName", "GivenOrTypeName"
         };
         for (i = 0; i < sizeof(display_names) / sizeof(display_names[0]); ++i) {
             property = patchlib_type_get_property(runtime->npc_type,
@@ -1925,18 +1923,67 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
                 } else if (!runtime->method_display_name_get_alt) {
                     runtime->property_display_name_alt = property;
                     runtime->method_display_name_get_alt = getter;
+                } else if (!runtime->method_display_name_get_third) {
+                    runtime->property_display_name_third = property;
+                    runtime->method_display_name_get_third = getter;
                 } else {
                     or_release_handle(property);
                     or_release_handle(getter);
                 }
                 if (runtime->method_display_name_get == getter ||
-                    runtime->method_display_name_get_alt == getter) {
+                    runtime->method_display_name_get_alt == getter ||
+                    runtime->method_display_name_get_third == getter) {
                     property = PATCH_NULL;
                     getter = PATCH_NULL;
                 }
             }
             or_release_handle(property);
             or_release_handle(getter);
+        }
+    }
+
+    /* Some Android metadata exports expose the property getter only as a
+     * method and do not return a Property object. Resolve those exact method
+     * names as a second path, matching EliteMonsters 1.3.2. */
+    if (patchlib_type_get_method_by_param_count &&
+        patchlib_method_get_signature && tefstd_vector_size) {
+        static const char *const display_getters[] = {
+            "get_FullName", "get_TypeName", "get_GivenOrTypeName"
+        };
+        for (i = 0; i < sizeof(display_getters) / sizeof(display_getters[0]); ++i) {
+            patch_handle_t method = patchlib_type_get_method_by_param_count(
+                runtime->npc_type, display_getters[i], 0);
+            patch_method_signature_t signature;
+            bool exact = false;
+            if (!or_handle_is_valid(method)) {
+                or_release_handle(method);
+                continue;
+            }
+            memset(&signature, 0, sizeof(signature));
+            if (patchlib_method_get_signature(method, &signature)) {
+                exact = signature.is_instance && signature.return_type == PATCH_OBJECT &&
+                        tefstd_vector_size(&signature.arg_types) == 0u;
+                if (patchlib_method_signature_free) {
+                    (void)patchlib_method_signature_free(&signature);
+                }
+            }
+            if (!exact || method == runtime->method_display_name_get ||
+                method == runtime->method_display_name_get_alt ||
+                method == runtime->method_display_name_get_third) {
+                or_release_handle(method);
+                continue;
+            }
+            if (!runtime->method_display_name_get) {
+                runtime->method_display_name_get = method;
+                method = PATCH_NULL;
+            } else if (!runtime->method_display_name_get_alt) {
+                runtime->method_display_name_get_alt = method;
+                method = PATCH_NULL;
+            } else if (!runtime->method_display_name_get_third) {
+                runtime->method_display_name_get_third = method;
+                method = PATCH_NULL;
+            }
+            or_release_handle(method);
         }
     }
 
@@ -2384,6 +2431,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_uninstall_hook(&runtime->strike_hook_id);
     or_uninstall_hook(&runtime->display_name_hook_id);
     or_uninstall_hook(&runtime->display_name_hook_id_alt);
+    or_uninstall_hook(&runtime->display_name_hook_id_third);
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         or_uninstall_hook(&runtime->mouse_text_hook_ids[i]);
     }
@@ -2421,6 +2469,8 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->method_display_name_get);
     or_release_handle(runtime->property_display_name_alt);
     or_release_handle(runtime->method_display_name_get_alt);
+    or_release_handle(runtime->property_display_name_third);
+    or_release_handle(runtime->method_display_name_get_third);
     or_release_handle(runtime->main_game_mode);
     or_release_handle(runtime->main_zenith_world);
     or_release_handle(runtime->main_hard_mode);
@@ -2487,6 +2537,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     runtime->strike_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id_alt = PATCH_HOOK_INVALID_ID;
+    runtime->display_name_hook_id_third = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }

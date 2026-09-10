@@ -4,7 +4,7 @@
   "tiers": {
     "altered": {
       "displayName": "异化体",
-      "color": "#49C96D",
+      "color": "#4CAF50",
       "defenseMultiplier": 1.10,
       "moneyMultiplier": 1.50,
       "knockbackReduction": 0.20,
@@ -14,7 +14,7 @@
     },
     "calamity": {
       "displayName": "灾变体",
-      "color": "#4287F5",
+      "color": "#3D8DFF",
       "defenseMultiplier": 1.20,
       "moneyMultiplier": 3.00,
       "knockbackReduction": 0.40,
@@ -24,7 +24,7 @@
     },
     "apocalypse": {
       "displayName": "终焉体",
-      "color": "#C04CFF",
+      "color": "#E53935",
       "defenseMultiplier": 1.30,
       "moneyMultiplier": 6.00,
       "knockbackReduction": 0.60,

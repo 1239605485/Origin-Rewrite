@@ -43,6 +43,10 @@ typedef struct OR_LootResult {
     uint8_t item_count;
     float reward_quality_multiplier;
     bool item_registry_required;
+    /* One concrete vanilla item is selected before the native spawn call. */
+    int32_t item_type;
+    int32_t item_stack;
+    const char *item_name;
     OR_MoneyPolicy money_policy;
     bool coin_backend_required;
 } OR_LootResult;

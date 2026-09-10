@@ -3,10 +3,26 @@
   "preserveVanillaLoot": true,
   "maxExtraRewardSlots": 1,
   "alteredExtraRewardChance": 0.20,
-  "allowVanillaCrates": false,
+  "allowVanillaCrates": true,
   "authority": "host-or-singleplayer",
   "moneyBackend": "NPC.value-only",
   "itemRegistryRequired": true,
-  "nativeExtraItemExecution": "disabled-until-NewItem-and-item-ids-verified",
-  "enableNativeExtraLoot": true
+  "nativeExtraItemExecution": "enabled-verified-9-arg-NewItem-with-slot-readback",
+  "enableNativeExtraLoot": true,
+  "altered": {
+    "extraRewardChance": 0.20,
+    "maxChance": 0.60,
+    "pool": "current-stage-vanilla-material-potion-ammo"
+  },
+  "calamity": {
+    "slots": 1,
+    "weights": {"material": 0.70, "consumable": 0.20, "equipment": 0.10}
+  },
+  "apocalypse": {
+    "slots": 1,
+    "crateChance": {"preHardmode": 0.20, "earlyHardmode": 0.40, "postPlantera": 0.25, "endgame": 0.15},
+    "branches": ["terrain-crate", "legal-equipment", "large-stage-material"]
+  },
+  "itemSource": "vanilla",
+  "exclude": ["futureContent", "bossBag", "bossSummon", "exclusiveBossDrop", "keyProgression"]
 }

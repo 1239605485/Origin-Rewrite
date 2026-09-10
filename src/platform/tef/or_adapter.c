@@ -996,17 +996,21 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
     }
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[REWARD_POLICY] eligible=yes tier=%s extraReward=%s "
-           "pool=%s slots=%u moneyPolicy=no_extra_grant committed=no rewards=test-gel "
-           "quality=%.3f chanceBonus=%.3f",
+           "pool=%s item=%s itemId=%d stack=%d slots=%u moneyPolicy=no_extra_grant "
+           "committed=no source=compiled-vanilla-whitelist quality=%.3f chanceBonus=%.3f",
            or_elite_tier_name(record->tier), policy.extra_reward ? "yes" : "no",
            policy.pool_id ? policy.pool_id : "none",
+           policy.item_name ? policy.item_name : "none", (int)policy.item_type,
+           (int)policy.item_stack,
            (unsigned)policy.extra_reward_slots,
            (double)policy.reward_quality_multiplier,
            (double)record->rules.reward_chance_bonus);
     if (!policy.extra_reward) {
+        bool no_reward_claimed = or_state_claim_loot(g_adapter.state, binding->key);
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[ITEM_CALL_PLAN_OBSERVE] ready=no reason=no_extra_reward "
-               "invoke=disabled");
+               "invoke=disabled lootCommitted=%s",
+               no_reward_claimed ? "yes" : "already_or_rejected");
     } else if (!g_adapter.runtime->item_new_item_signature_ready) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[ITEM_CALL_PLAN_OBSERVE] ready=no reason=NewItem_signature_unavailable "
@@ -1056,12 +1060,15 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
                "[ITEM_NEWITEM_ROUTE] primary=NewItem9 disabled "
                "alternate=NewItem12 metadata-only pointerArgs=unverified");
     } else {
-        /* Controlled first live reward test: one fixed vanilla Gel only. */
+        /* The policy already selected exactly one vanilla item. This is the
+         * only native mutation point; no second reward decision is made here. */
         OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[ITEM_CALL_PLAN] ready=yes reason=controlled_gel_test "
-               "invoke=enabled mutation=allowed");
-        const char *drop_name = "Gel";
-        int16_t net_id = 23;
+               "[ITEM_CALL_PLAN] ready=yes reason=v06_policy_selected_item "
+               "invoke=enabled mutation=allowed item=%s itemId=%d stack=%d",
+               policy.item_name ? policy.item_name : "unknown",
+               (int)policy.item_type, (int)policy.item_stack);
+        const char *drop_name = policy.item_name ? policy.item_name : "VanillaItem";
+        int16_t net_id = (int16_t)policy.item_type;
         unsigned char position_raw[8] = {0};
         float position_x = 0.0f;
         float position_y = 0.0f;
@@ -1071,6 +1078,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
         int32_t height = 0;
         int16_t resolved_item_id = -1;
         int32_t item_type_arg = -1;
+        int32_t item_stack_arg = policy.item_stack;
         int32_t spawn_width = 0;
         int32_t spawn_height = 0;
         int32_t result_slot = -1;
@@ -1122,30 +1130,28 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
             spawn_width > 0 && spawn_height > 0 && isfinite(position_x) && isfinite(position_y)) {
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[ITEM_CALL_ARGS] phase=before x=%d y=%d width=%d height=%d type=%d "
-                   "stack=1 noBroadcast=1 prefix=0 ownership=0 fallback=%s",
+                   "stack=%d noBroadcast=1 prefix=0 ownership=0 fallback=%s",
                    (int)x, (int)y, (int)spawn_width, (int)spawn_height,
-                   (int)item_type_arg, size_fallback ? "yes" : "no");
+                   (int)item_type_arg, (int)item_stack_arg,
+                   size_fallback ? "yes" : "no");
             args[0] = &x;
             args[1] = &y;
             args[2] = &spawn_width;
             args[3] = &spawn_height;
             args[4] = &item_type_arg;
-            {
-                int32_t stack = 1;
-                args[5] = &stack;
-                args[6] = &no_broadcast;
-                args[7] = &prefix;
-                args[8] = &ownership;
-            }
+            args[5] = &item_stack_arg;
+            args[6] = &no_broadcast;
+            args[7] = &prefix;
+            args[8] = &ownership;
             call_ok = patchlib_method_invoke_args(
                 g_adapter.runtime->method_item_new_item, PATCH_NULL,
                 &result_slot, args);
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[ITEM_CALL_ARGS] phase=after invoke=%s x=%d y=%d width=%d height=%d "
-                   "type=%d resultSlot=%d",
+                   "type=%d stack=%d resultSlot=%d",
                    call_ok ? "ok" : "failed", (int)x, (int)y,
                    (int)spawn_width, (int)spawn_height, (int)item_type_arg,
-                   (int)result_slot);
+                   (int)item_stack_arg, (int)result_slot);
             if (call_ok && result_slot >= 0 && g_adapter.runtime->main_item_field &&
                 g_adapter.runtime->item_field_type && patchlib_array_at &&
                 patchlib_field_get_value) {
@@ -1194,21 +1200,29 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
         }
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[ITEM_CALL_COMMIT] item=%s expectedId=%d readbackId=%d idRead=%s position=%s width=%s:%d "
-               "height=%s:%d sizeFallback=%s spawnSize=%dx%d invoke=%s mutationSubmitted=%s slot=%d slotType=%s:%d stackRead=%s:%d noBroadcast=true prefix=0 ownership=0",
+               "height=%s:%d sizeFallback=%s spawnSize=%dx%d invoke=%s mutationSubmitted=%s slot=%d slotType=%s:%d stackExpected=%d stackRead=%s:%d noBroadcast=true prefix=0 ownership=0",
                drop_name, (int)item_type_arg, (int)slot_item_type, id_ok ? "ok" : "failed",
                position_ok ? "ok" : "failed", width_ok ? "ok" : "failed", width,
                height_ok ? "ok" : "failed", height, size_fallback ? "yes" : "no",
                (int)spawn_width, (int)spawn_height,
                call_ok ? "ok" : "blocked_or_failed", call_ok ? "yes" : "no", (int)result_slot,
                slot_read_ok ? "ok" : "unavailable", (int)slot_item_type,
-               stack_read_ok ? "ok" : "unavailable", (int)slot_item_stack);
+               (int)item_stack_arg, stack_read_ok ? "ok" : "unavailable", (int)slot_item_stack);
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[ITEM_WRITEBACK_VERIFY] expected=%d readback=%d match=%s stackReadback=%d "
-               "stackMatch=%s invoke=%s slot=%d verification=field-readback",
+               "stackExpected=%d stackMatch=%s invoke=%s slot=%d verification=field-readback",
                (int)item_type_arg, (int)slot_item_type,
                slot_read_ok && item_type_arg == slot_item_type ? "yes" : "no",
-               (int)slot_item_stack, stack_read_ok && slot_item_stack == 1 ? "yes" : "no",
+               (int)slot_item_stack, (int)item_stack_arg,
+               stack_read_ok && slot_item_stack == item_stack_arg ? "yes" : "no",
                call_ok ? "ok" : "failed", (int)result_slot);
+        if (call_ok) {
+            bool reward_claimed = or_state_claim_loot(g_adapter.state, binding->key);
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[EXTRA_LOOT_COMMIT] item=%s id=%d stack=%d claimed=%s",
+                   drop_name, (int)item_type_arg, (int)item_stack_arg,
+                   reward_claimed ? "yes" : "already_or_rejected");
+        }
     }
 }
 
@@ -1726,17 +1740,13 @@ static bool write_given_name_marker(patch_handle_t instance,
         }
         free(name);
     } else {
-        /* Hostile NPCs commonly have no custom GivenName. Keep the write
-         * compatible with that normal state instead of rejecting it; the
-         * runtime can then decide whether FullName uses the assigned value. */
+        /* Hostile NPCs commonly have no custom GivenName. Do not write a
+         * prefix-only string: the EliteMonsters-compatible display getter
+         * hook below decorates the real vanilla name instead. */
         free(name);
-        if (snprintf(decorated, sizeof(decorated), "%s", prefix) >=
-            (int)sizeof(decorated)) {
-            reason = "prefix_too_long";
-            goto fail;
-        }
         used_empty_fallback = true;
-        reason = "empty_given_name_fallback";
+        reason = "empty_given_name_defer_to_display_getter";
+        goto fail;
     }
     remember_name_color(decorated, tier);
     replacement = patchlib_string_create(decorated);
@@ -2580,32 +2590,53 @@ static bool install_prefix(patch_handle_t method, prefix_callback_t callback,
 static void display_name_color_postfix(patch_handle_t instance, void **args,
                                        void *result,
                                        const patch_method_signature_t *sig_info) {
+    OR_NativeBinding *binding;
+    const OR_EliteRecord *record;
     patch_handle_t text_handle = PATCH_NULL;
+    patch_handle_t replacement;
     char *text;
+    char decorated[512];
     OR_EliteTier tier;
+    const char *prefix;
     static uint32_t seen_count;
-    (void)instance;
     (void)args;
     (void)sig_info;
-    if (!result || !patchlib_string_cstr) return;
+    if (!instance || !result || !patchlib_string_cstr || !patchlib_string_create) return;
+    binding = find_binding(instance);
+    if (!binding || !binding->elite || !g_adapter.state) return;
+    record = or_state_find_const(g_adapter.state, binding->key);
+    if (!record || record->tier <= OR_TIER_NONE || record->tier >= OR_TIER_COUNT) return;
+    tier = record->tier;
+    prefix = tier_prefix(tier);
+    if (!prefix) return;
     memcpy(&text_handle, result, sizeof(text_handle));
     if (!text_handle) return;
     text = patchlib_string_cstr(text_handle);
     if (!text) return;
-    tier = remembered_name_tier(text);
-    if (tier == OR_TIER_NONE) {
-        if (strstr(text, "终焉体·") != NULL) tier = OR_TIER_APOCALYPSE;
-        else if (strstr(text, "灾变体·") != NULL) tier = OR_TIER_CALAMITY;
-        else if (strstr(text, "异化体·") != NULL) tier = OR_TIER_ALTERED;
-    }
-    if (tier != OR_TIER_NONE) {
-        remember_name_color(text, tier);
-        if (seen_count < 16u) {
-            ++seen_count;
-            OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[NAME_DISPLAY_SEEN] source=display_getter tier=%s name=%s",
-                   or_elite_tier_name(tier), text);
+    remember_name_color(text, tier);
+    if (strstr(text, prefix) == NULL) {
+        if (snprintf(decorated, sizeof(decorated), "%s·%s", prefix, text) >=
+            (int)sizeof(decorated)) {
+            free(text);
+            return;
         }
+        replacement = patchlib_string_create(decorated);
+        if (replacement && patchlib_is_valid(replacement)) {
+            *(patch_handle_t *)result = replacement;
+            remember_name_color(decorated, tier);
+            if (seen_count < 32u) {
+                ++seen_count;
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[NAME_DISPLAY_APPLY] source=FullNameOrTypeName tier=%s "
+                       "name=%s decorated=%s",
+                       or_elite_tier_name(tier), text, decorated);
+            }
+        }
+    } else if (seen_count < 32u) {
+        ++seen_count;
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[NAME_DISPLAY_APPLY] source=already_decorated tier=%s name=%s",
+               or_elite_tier_name(tier), text);
     }
     free(text);
 }
@@ -2634,13 +2665,13 @@ static bool mouse_text_name_color_prefix(patch_handle_t instance, void **args,
      * rewrite marker is not guaranteed to be at offset zero. */
     if (matched_tier == OR_TIER_APOCALYPSE || strstr(text, "终焉体·") != NULL) {
         tier = "终焉体";
-        replacement = 5; /* vanilla pink */
+        replacement = 10; /* vanilla red */
     } else if (matched_tier == OR_TIER_CALAMITY || strstr(text, "灾变体·") != NULL) {
         tier = "灾变体";
-        replacement = 9; /* vanilla cyan */
+        replacement = 1; /* vanilla blue */
     } else if (matched_tier == OR_TIER_ALTERED || strstr(text, "异化体·") != NULL) {
         tier = "异化体";
-        replacement = 7; /* vanilla lime */
+        replacement = 2; /* vanilla green */
     } else {
         if (seen_count < 32u) {
             ++seen_count;
@@ -2734,6 +2765,10 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                ? patchlib_property_get_name(runtime->property_display_name)
                : "unavailable",
            runtime->method_display_name_get ? "available" : "unavailable");
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[NAME_SOURCE_HOOKS] FullName=%s TypeName=%s GivenOrTypeName=%s",
+           runtime->method_display_name_get ? "available" : "unavailable",
+           runtime->method_display_name_get_alt ? "available" : "unavailable",
+           runtime->method_display_name_get_third ? "available" : "unavailable");
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[NOTICE_API] NewText=%s params=%d colorType=%d",
            runtime->capabilities.new_text_ready ? "available" : "unavailable",
@@ -2743,10 +2778,13 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
            "[NAME_COLOR_API] MouseText=%s signature=%s",
            runtime->capabilities.name_color_hook_ready ? "available" : "unavailable",
            runtime->main_mouse_text_signature_ready ? "verified" : "safe_off");
-    if (runtime->method_display_name_get && runtime->display_name_hook_id == PATCH_HOOK_INVALID_ID) {
+    {
+        size_t name_hooks = 0u;
+        if (runtime->method_display_name_get && runtime->display_name_hook_id == PATCH_HOOK_INVALID_ID) {
         if (install_postfix(runtime->method_display_name_get,
                             display_name_color_postfix,
                             &runtime->display_name_hook_id)) {
+                ++name_hooks;
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[NAME_DISPLAY_HOOK] installed=yes source=%s",
                    runtime->property_display_name && patchlib_property_get_name &&
@@ -2757,11 +2795,21 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
             OR_LOG(MOD_LOG_LEVEL_WARNING,
                    "[NAME_DISPLAY_HOOK] installed=no reason=hook_install_failed");
         }
-    }
-    if (runtime->method_display_name_get_alt && runtime->display_name_hook_id_alt == PATCH_HOOK_INVALID_ID) {
-        (void)install_postfix(runtime->method_display_name_get_alt,
-                              display_name_color_postfix,
-                              &runtime->display_name_hook_id_alt);
+        }
+        if (runtime->method_display_name_get_alt && runtime->display_name_hook_id_alt == PATCH_HOOK_INVALID_ID) {
+            if (install_postfix(runtime->method_display_name_get_alt,
+                                display_name_color_postfix,
+                                &runtime->display_name_hook_id_alt)) ++name_hooks;
+        }
+        if (runtime->method_display_name_get_third &&
+            runtime->display_name_hook_id_third == PATCH_HOOK_INVALID_ID) {
+            if (install_postfix(runtime->method_display_name_get_third,
+                                display_name_color_postfix,
+                                &runtime->display_name_hook_id_third)) ++name_hooks;
+        }
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[NAME_DISPLAY_HOOKS] installed=%u expected=3 source=EliteMonsters-compatible-getters",
+               (unsigned)name_hooks);
     }
     {
         size_t mouse_text_hooks = 0u;
