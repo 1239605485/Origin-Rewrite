@@ -42,6 +42,7 @@ set(ORIGINREWRITE_PLATFORM_SOURCES
     src/platform/tef/or_runtime.c
     src/platform/tef/or_broadcast.c
     src/platform/tef/or_visual_effects.c
+    src/platform/tef/or_head_marker.c
     "${ORIGINREWRITE_MOD_API_DIR}/tefkernel/tef_api_imp.c"
 )
 
@@ -59,7 +60,7 @@ target_include_directories(OriginRewrite
 target_compile_definitions(OriginRewrite PRIVATE
     ORIGINREWRITE_BUILDING=1
     BUILDING_DLL=1
-    ORIGINREWRITE_VERSION="1.0.0"
+    ORIGINREWRITE_VERSION="1.1.0"
 )
 
 if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")

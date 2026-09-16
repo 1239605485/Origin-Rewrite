@@ -20,7 +20,7 @@ bash scripts/package_android_arm64.sh
 ## 安装包布局
 
 ```text
-OriginRewrite-v1.0.0.zip
+OriginRewrite-v1.0.14.zip
 ├── Manifest.json
 ├── Info.json
 ├── OriginRewrite.json
