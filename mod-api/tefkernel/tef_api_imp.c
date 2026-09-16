@@ -47,6 +47,7 @@
 #include "module/module_core.h"
 #include "tefpackage/tefpkg.h"
 #include "tefplugin/tpf_core.h"
+#include "terraria/texture2d.h"
 
 /* The Android field API exposes this pointer through the loader.  Define the
  * same symbol for host-side -z,defs checks so the source remains link-clean. */

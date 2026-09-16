@@ -7,7 +7,7 @@
   "authority": "host-or-singleplayer",
   "moneyBackend": "NPC.value-only",
   "itemRegistryRequired": true,
-  "nativeExtraItemExecution": "enabled-verified-9-arg-NewItem-with-slot-readback",
+  "nativeExtraItemExecution": "single-attempt-9-arg-NewItem-unreserved-owner-with-slot-readback",
   "enableNativeExtraLoot": true,
   "altered": {
     "extraRewardChance": 0.20,

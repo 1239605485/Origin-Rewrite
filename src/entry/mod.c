@@ -22,9 +22,9 @@ static OR_Runtime g_runtime;
 
 static kernel_mod_info_t g_mod_info = {
     .pkg_id = "li06.originrewrite",
-    .version_code = 2026091100,
+    .version_code = 2026091700,
     .api_version = 1,
-    .version = "1.0.0"
+    .version = "1.1.0"
 };
 
 static void init_mod(kernel_mod_handle_t *handle) {
@@ -33,7 +33,7 @@ static void init_mod(kernel_mod_handle_t *handle) {
     OR_ConfigIoReport config_report = {0};
     or_log_init(handle);
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=1.0.0 versionCode=2026091100 stage=enter");
+           "[MODULE_BEACON] version=1.1.0 versionCode=2026091700 stage=enter");
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[ARCHITECTURE] core=pure-c metadata=TEFKernel-PatchLib "
            "lifecycle=SetDefaults-observe/AI-active-commit failPolicy=SAFE-OFF");
@@ -67,15 +67,18 @@ static void init_mod(kernel_mod_handle_t *handle) {
     }
     if (!runtime_ok) {
         OR_LOG(MOD_LOG_LEVEL_WARNING, "TEFKernel PatchLib probe failed; gameplay hooks remain disabled");
-    } else if (!or_adapter_start(&g_runtime, &g_config, &g_state)) {
+    } else {
+        or_adapter_set_private_dir(handle ? handle->private_dir : NULL);
+        if (!or_adapter_start(&g_runtime, &g_config, &g_state)) {
         OR_LOG(MOD_LOG_LEVEL_WARNING,
                "Verified mobile NPC hooks were not installable; gameplay overlay remains disabled");
+        }
     }
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=1.0.0 gameplay=%s metadata=%s",
+    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=1.1.0 gameplay=%s metadata=%s",
            g_runtime.capabilities.gameplay_enabled ? "on" : "off",
            "PatchLib");
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=1.0.0 versionCode=2026091100 stage=ready");
+           "[MODULE_BEACON] version=1.1.0 versionCode=2026091700 stage=ready");
 }
 
 static void cleanup_mod(kernel_mod_handle_t *handle) {

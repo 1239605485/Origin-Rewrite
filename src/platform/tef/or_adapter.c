@@ -10,6 +10,7 @@
 #include "or_boss_dialog_adapter.h"
 #include "or_player_rule_adapter.h"
 #include "or_visual_effects.h"
+#include "or_head_marker.h"
 
 #include "tefkernel/patchlib/field.h"
 #include "tefkernel/patchlib/method.h"
@@ -48,7 +49,7 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_VISUAL_METHOD_ARG_LIMIT 8u
 #define OR_NAME_COLOR_HOOK_LIMIT 128u
 #define OR_TERRARIA_TICKS_PER_DAY 86400u
-#define ORIGINREWRITE_ENABLE_BOSS_DIALOG 0
+#define ORIGINREWRITE_ENABLE_BOSS_DIALOG 1
 #define ORIGINREWRITE_ENABLE_SPECIAL_AI 1
 
 #define OR_DIAG_LOG(...) \
@@ -140,6 +141,7 @@ typedef struct OR_Adapter {
     OR_WorldRuleState world_rules;
     uint64_t world_rules_session;
     uint64_t world_rule_revision;
+    uint64_t last_daily_broadcast_wall_second;
     uint64_t world_clock_session;
     uint64_t world_clock_start_tick;
     uint64_t game_day_counter;
@@ -152,6 +154,11 @@ typedef struct OR_Adapter {
     uint32_t ai_projectiles_this_tick;
     uint32_t ai_summons_this_tick;
     bool world_bootstrap_emitted;
+    bool world_state_observed;
+    bool terrain_broadcast_pending;
+    uint8_t world_broadcast_step;
+    OR_Weather last_world_weather;
+    bool last_world_night;
     bool rule_summary_emitted;
     uint64_t last_world_session_seen;
     patch_handle_t last_player_identity;
@@ -159,14 +166,65 @@ typedef struct OR_Adapter {
     bool last_player_terrain_valid;
     float last_player_position[2];
     bool last_player_position_valid;
+    bool player_dead_cached;
     OR_BossDialogAdapter boss_dialog_by_type[1024];
     bool boss_active_by_type[1024];
 } OR_Adapter;
 
 static OR_Adapter g_adapter;
+static char g_private_dir[768];
+
+void or_adapter_set_private_dir(const char *private_dir) {
+    if (!private_dir) { g_private_dir[0] = '\0'; return; }
+    (void)snprintf(g_private_dir, sizeof(g_private_dir), "%s", private_dir);
+}
+
+static uint64_t world_rules_fingerprint(uint64_t session,
+                                        OR_TerrainSnapshot terrain,
+                                        OR_ProgressStage progress) {
+    uint64_t h = UINT64_C(1469598103934665603);
+    h ^= session; h *= UINT64_C(1099511628211);
+    h ^= (uint64_t)terrain.depth + ((uint64_t)terrain.biome << 8) + ((uint64_t)terrain.special << 16);
+    h *= UINT64_C(1099511628211);
+    h ^= (uint64_t)progress; h *= UINT64_C(1099511628211);
+    return h ? h : 1u;
+}
+
+static bool world_rules_load(uint64_t fingerprint, OR_WorldRuleState *state) {
+    char path[832]; uint64_t stored = 0u; FILE *f;
+    if (!g_private_dir[0] || !state || snprintf(path, sizeof(path), "%s/or_world_rules.bin", g_private_dir) <= 0) return false;
+    f = fopen(path, "rb"); if (!f) return false;
+    if (fread(&stored, sizeof(stored), 1u, f) != 1u || stored != fingerprint || fread(state, sizeof(*state), 1u, f) != 1u) { fclose(f); return false; }
+    fclose(f); return true;
+}
+
+static void world_rules_save(uint64_t fingerprint, const OR_WorldRuleState *state) {
+    char path[832]; char temp[840]; FILE *f;
+    if (!g_private_dir[0] || !state || snprintf(path, sizeof(path), "%s/or_world_rules.bin", g_private_dir) <= 0 || snprintf(temp, sizeof(temp), "%s.tmp", path) <= 0) return;
+    f = fopen(temp, "wb"); if (!f) return;
+    if (fwrite(&fingerprint, sizeof(fingerprint), 1u, f) == 1u && fwrite(state, sizeof(*state), 1u, f) == 1u) { fflush(f); fclose(f); (void)rename(temp, path); } else fclose(f);
+}
+
+/* Multi-part bosses must share one narrative encounter.  Keep this mapping in
+ * the observer as well as the voice catalog so a twin, limb or segment never
+ * produces a second arrival/death event. */
+static uint32_t boss_dialog_key(uint32_t npc_type) {
+    switch (npc_type) {
+    case 14u: case 15u: return 13u;
+    case 36u: case 37u: case 38u: case 39u: return 35u;
+    case 126u: return 125u;
+    case 128u: case 129u: return 127u;
+    default: return npc_type;
+    }
+}
 static uint32_t g_batch_drop_index;
+static uint64_t g_fallback_world_session = 1u;
+/* Stop after the first verified-empty slot. The target runtime previously
+ * accepted the call but left the selected Item as Air. */
+static bool g_native_extra_loot_disabled_for_session;
 
 static bool host_authority(bool *single_player, bool *known);
+static bool read_i32(patch_handle_t field, patch_handle_t instance, int32_t *out);
 static uint64_t update_tick(void);
 static OR_ProgressStage current_progress(void);
 static const char *biome_name(OR_BiomeTag biome);
@@ -233,19 +291,42 @@ static void observe_player_rules(patch_handle_t instance) {
             patchlib_method_invoke_args)
             (void)patchlib_method_invoke_args(g_adapter.runtime->main_local_player_get,
                                               PATCH_NULL, &player_identity, NULL);
+        /* Read Player.dead here, outside the render hook. Calling managed
+         * methods from DrawNPCs can deadlock the UI thread on Android. */
+        g_adapter.player_dead_cached = true;
+        if (player_identity) {
+            bool dead = true;
+            if (or_head_marker_read_player_dead(player_identity, &dead))
+                g_adapter.player_dead_cached = dead;
+        }
         if (player_identity && player_identity != g_adapter.last_player_identity) {
+            uint32_t boss_type;
+            /* On this Android build LocalPlayer receives a new managed
+             * identity after respawn. While a boss is still active, use that
+             * verified lifecycle edge as the player-death notification. */
+            for (boss_type = 0u; boss_type < 1024u; ++boss_type) {
+                if (g_adapter.boss_active_by_type[boss_type]) {
+                    (void)or_broadcast_emit_boss_player_death(&g_adapter.broadcast,
+                        g_adapter.runtime, boss_type, 0u, tick);
+                }
+            }
             g_adapter.last_player_identity = player_identity;
             g_adapter.last_player_position_valid = false;
             g_adapter.world_bootstrap_emitted = false;
+            g_adapter.world_state_observed = false;
+            g_adapter.terrain_broadcast_pending = false;
+            g_adapter.world_broadcast_step = 0u;
             g_adapter.rule_summary_emitted = false;
+            g_adapter.last_daily_broadcast_wall_second = 0u;
             or_player_rule_adapter_init(&g_adapter.player_rules);
             /* Broadcast deduplication is session-scoped. A returning player
              * must receive current-world notices again even when keys match.
              * World rules themselves belong to the world session, not to the
              * managed-player object, so they intentionally remain in memory. */
-            or_broadcast_init(&g_adapter.broadcast);
+            or_broadcast_on_player_respawn(&g_adapter.broadcast);
             OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[WORLD_SESSION_CHANGE] playerChanged=yes reset=bootstrap preserve=world_rule_memory");
+                   "[PLAYER_RESPAWN] reset=bootstrap preserve=world_rule_memory session=%llu",
+                   (unsigned long long)world_session_id());
         }
     }
     /* NPC.AI invokes this observer once per NPC. Use LocalPlayer as the only
@@ -265,25 +346,63 @@ static void observe_player_rules(patch_handle_t instance) {
     {
         bool world = false;
         bool summary = false;
-        bool terrain_notice = false;
+        bool world_state_changed = !g_adapter.world_state_observed ||
+                                   g_adapter.last_world_weather != weather ||
+                                   g_adapter.last_world_night != night;
         bool terrain_changed = or_player_rule_adapter_on_context(&g_adapter.player_rules,
                                                                   terrain);
-        if (!g_adapter.world_bootstrap_emitted) {
+        if (terrain_changed) g_adapter.terrain_broadcast_pending = true;
+        /* Environment cards are disabled. The entry template has one world
+         * state card and exactly one world-rule card. */
+        if (g_adapter.world_broadcast_step == 0u ||
+            (g_adapter.world_broadcast_step >= 2u && world_state_changed)) {
             world = or_broadcast_emit_world(&g_adapter.broadcast, g_adapter.runtime,
                                             weather, night, world_session_id(), tick);
-            if (world) g_adapter.world_bootstrap_emitted = true;
+            if (world) {
+                if (g_adapter.world_state_observed &&
+                    g_adapter.last_world_night != night) {
+                    OR_LOG(MOD_LOG_LEVEL_INFO,
+                           "[TIME_PHASE_CHANGE] from=%s to=%s source=Main.dayTime readOnly=yes",
+                           g_adapter.last_world_night ? "night" : "day",
+                           night ? "night" : "day");
+                }
+                g_adapter.world_bootstrap_emitted = true;
+                g_adapter.world_state_observed = true;
+                g_adapter.last_world_weather = weather;
+                g_adapter.last_world_night = night;
+            }
+            if (world) {
+                if (g_adapter.world_broadcast_step == 0u) g_adapter.world_broadcast_step = 1u;
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[PLAYER_RULE_SEQUENCE] step=%u card=world_state next=%s",
+                       g_adapter.world_broadcast_step == 1u ? 1u : 0u,
+                       g_adapter.world_broadcast_step == 1u ? "world_rules" : "idle");
+                return;
+            }
         }
-        if (g_adapter.world_rules.initialized && !g_adapter.rule_summary_emitted) {
-            if (or_broadcast_emit_rule_summary(&g_adapter.broadcast, g_adapter.runtime,
-                                               &g_adapter.world_rules.snapshot,
-                                               g_adapter.world_rule_revision, tick))
+        if (g_adapter.world_broadcast_step == 1u &&
+            g_adapter.world_rules.initialized && !g_adapter.rule_summary_emitted) {
+            summary = or_broadcast_emit_rule_summary(&g_adapter.broadcast,
+                                                      g_adapter.runtime,
+                                                      &g_adapter.world_rules.snapshot,
+                                                      g_adapter.world_rule_revision,
+                                                      tick);
+            if (summary) {
                 g_adapter.rule_summary_emitted = true;
-            summary = g_adapter.rule_summary_emitted;
+                g_adapter.world_broadcast_step = 2u;
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[PLAYER_RULE_SEQUENCE] step=2 card=world_rules complete=yes");
+                return;
+            }
         }
-        if (terrain_changed) {
-            terrain_notice = or_broadcast_emit_terrain(&g_adapter.broadcast,
-                                                       g_adapter.runtime, terrain,
-                                                       tick, tick);
+        if (g_adapter.world_broadcast_step >= 2u &&
+            g_adapter.world_rules.initialized &&
+            ((uint64_t)time(NULL) >= g_adapter.last_daily_broadcast_wall_second +
+             (OR_DAILY_BROADCAST_INTERVAL_TICKS / 60u))) {
+            bool daily = or_broadcast_emit_daily(
+                &g_adapter.broadcast, g_adapter.runtime,
+                &g_adapter.world_rules.snapshot, g_adapter.world_rule_revision, tick);
+            if (daily) g_adapter.last_daily_broadcast_wall_second = (uint64_t)time(NULL);
         }
         if (world || summary || terrain_changed) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -292,7 +411,7 @@ static void observe_player_rules(patch_handle_t instance) {
                terrain_depth_name(terrain.depth), biome_name(terrain.biome),
                special_name(terrain.special),
                world ? "yes" : "no", summary ? "yes" : "no",
-               terrain_notice ? "yes" : (terrain_changed ? "dedup_or_cooldown" : "no"));
+               "disabled");
         }
     }
 }
@@ -922,17 +1041,19 @@ void or_adapter_observe_death_state(patch_handle_t instance,
     OR_NativeBinding *binding;
     if (!instance || !g_adapter.installed || !g_adapter.state ||
         (life > 0 && active)) return;
-    if (ORIGINREWRITE_ENABLE_BOSS_DIALOG && npc_type >= 0 && npc_type < 1024 && g_adapter.boss_active_by_type[npc_type]) {
+    if (ORIGINREWRITE_ENABLE_BOSS_DIALOG && npc_type >= 0 && npc_type < 1024 &&
+        g_adapter.boss_active_by_type[boss_dialog_key((uint32_t)npc_type)]) {
         OR_BossDialogEvent boss_event;
-        g_adapter.boss_active_by_type[npc_type] = false;
-        if (or_boss_dialog_adapter_observe_death(&g_adapter.boss_dialog_by_type[npc_type], &boss_event)) {
+        uint32_t dialog_key = boss_dialog_key((uint32_t)npc_type);
+        g_adapter.boss_active_by_type[dialog_key] = false;
+        if (or_boss_dialog_adapter_observe_death(&g_adapter.boss_dialog_by_type[dialog_key], &boss_event)) {
             bool shown = or_broadcast_emit_boss_dialog(&g_adapter.broadcast,
-                g_adapter.runtime, (uint32_t)npc_type, boss_event, update_tick());
+                g_adapter.runtime, dialog_key, boss_event, update_tick());
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[BOSS_DIALOG_EVENT] type=%d event=death shown=%s readOnly=yes",
                    (int)npc_type, shown ? "yes" : "no");
         }
-        or_boss_dialog_adapter_reset(&g_adapter.boss_dialog_by_type[npc_type]);
+        or_boss_dialog_adapter_reset(&g_adapter.boss_dialog_by_type[dialog_key]);
     }
     binding = find_binding(instance);
     if (!binding || binding->death_started) return;
@@ -940,13 +1061,14 @@ void or_adapter_observe_death_state(patch_handle_t instance,
     if (binding->pending_is_boss) {
         OR_BossDialogEvent boss_event;
         if (npc_type >= 0 && npc_type < 1024 &&
-            or_boss_dialog_adapter_observe_death(&g_adapter.boss_dialog_by_type[npc_type], &boss_event)) {
+            or_boss_dialog_adapter_observe_death(&g_adapter.boss_dialog_by_type[boss_dialog_key((uint32_t)npc_type)], &boss_event)) {
+            uint32_t dialog_key = boss_dialog_key((uint32_t)npc_type);
             bool shown = or_broadcast_emit_boss_dialog(&g_adapter.broadcast,
-                g_adapter.runtime, (uint32_t)npc_type, boss_event, update_tick());
+                g_adapter.runtime, dialog_key, boss_event, update_tick());
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[BOSS_DIALOG_EVENT] type=%d event=death shown=%s readOnly=yes",
                    (int)npc_type, shown ? "yes" : "no");
-            or_boss_dialog_adapter_reset(&g_adapter.boss_dialog_by_type[npc_type]);
+            or_boss_dialog_adapter_reset(&g_adapter.boss_dialog_by_type[dialog_key]);
         }
     }
     if (!binding->elite) return;
@@ -982,6 +1104,11 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
     binding = find_binding(instance);
     if (!binding || !binding->elite || binding->loot_seen) return;
     binding->loot_seen = true;
+    if (g_native_extra_loot_disabled_for_session) {
+        OR_LOG(MOD_LOG_LEVEL_WARNING,
+               "[EXTRA_LOOT_SAFE_OFF] reason=prior_NewItem_readback_failed action=preserve_vanilla_loot_only");
+        return;
+    }
     or_runtime_probe_main_item_array(g_adapter.runtime);
     {
         unsigned char position_raw[8] = {0};
@@ -1166,9 +1293,11 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
         int32_t spawn_height = 0;
         OR_Int32ReturnCell result_cell = { .raw = UINT64_C(0x4f525f534c4f5455) };
         int32_t result_slot = -1;
-        bool no_broadcast = true;
+        /* Ownership is explicitly exposed by this target overload. Use the
+         * vanilla unreserved sentinel and normal local spawn notification. */
+        bool no_broadcast = false;
         int32_t prefix = 0;
-        int32_t ownership = 0;
+        int32_t ownership = 255;
         void *args[9];
         bool position_ok = read_position_raw(g_adapter.runtime->field_position_probe,
                                               instance, position_raw);
@@ -1215,7 +1344,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
             spawn_width > 0 && spawn_height > 0 && isfinite(position_x) && isfinite(position_y)) {
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[ITEM_CALL_ARGS] phase=before x=%d y=%d width=%d height=%d type=%d "
-                   "stack=%d noBroadcast=1 prefix=0 ownership=0 fallback=%s",
+                   "stack=%d noBroadcast=0 prefix=0 ownership=255 fallback=%s",
                    (int)x, (int)y, (int)spawn_width, (int)spawn_height,
                    (int)item_type_arg, (int)item_stack_arg,
                    size_fallback ? "yes" : "no");
@@ -1288,7 +1417,7 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
         }
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[ITEM_CALL_COMMIT] item=%s expectedId=%d readbackId=%d idRead=%s position=%s width=%s:%d "
-               "height=%s:%d sizeFallback=%s spawnSize=%dx%d invoke=%s mutationSubmitted=%s slot=%d slotType=%s:%d stackExpected=%d stackRead=%s:%d noBroadcast=true prefix=0 ownership=0",
+               "height=%s:%d sizeFallback=%s spawnSize=%dx%d invoke=%s mutationSubmitted=%s slot=%d slotType=%s:%d stackExpected=%d stackRead=%s:%d noBroadcast=false prefix=0 ownership=255",
                drop_name, (int)item_type_arg, (int)slot_item_type, id_ok ? "ok" : "failed",
                position_ok ? "ok" : "failed", width_ok ? "ok" : "failed", width,
                height_ok ? "ok" : "failed", height, size_fallback ? "yes" : "no",
@@ -1320,6 +1449,13 @@ void or_adapter_observe_loot_boundary(patch_handle_t instance) {
                    (int)result_slot, writeback_verified ? "yes" : "no", verification);
             bool reward_claimed = writeback_verified &&
                                    or_state_claim_loot(g_adapter.state, binding->key);
+            if (!writeback_verified) {
+                g_native_extra_loot_disabled_for_session = true;
+                OR_LOG(MOD_LOG_LEVEL_WARNING,
+                       "[EXTRA_LOOT_SAFE_OFF] reason=NewItem_returned_empty_slot action=preserve_vanilla_loot_only expectedType=%d expectedStack=%d readbackType=%d readbackStack=%d",
+                       (int)item_type_arg, (int)item_stack_arg,
+                       (int)slot_item_type, (int)slot_item_stack);
+            }
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[EXTRA_LOOT_COMMIT] item=%s id=%d stack=%d claimed=%s "
                    "writebackVerified=%s verification=%s",
@@ -1438,7 +1574,7 @@ static uint64_t world_session_id(void) {
         }
     }
     if (read_ok) return (uint64_t)(uint32_t)world_id;
-    return 1u;
+    return g_fallback_world_session;
 }
 
 static uint64_t update_tick(void) {
@@ -1502,21 +1638,32 @@ static void ensure_world_rules(OR_ProgressStage progress,
                                bool is_night,
                                uint64_t session,
                                uint64_t game_day) {
+    uint64_t fingerprint = world_rules_fingerprint(session, terrain, progress);
     if (!g_adapter.config) return;
     if (!g_adapter.world_rules.initialized ||
         g_adapter.world_rules_session != session) {
-        OR_WorldRuleStateStatus status = or_world_rules_create(
-            &g_adapter.world_rules, g_adapter.config, progress, terrain, weather,
-            is_night, session, UINT64_C(0x4f52494700000022), session);
+        OR_WorldRuleStateStatus status;
+        if (world_rules_load(fingerprint, &g_adapter.world_rules) &&
+            or_world_rules_restore(&g_adapter.world_rules, g_adapter.config, 1u, 1u,
+                                   UINT64_C(0x4f52494700000022), fingerprint) == OR_WORLD_RULES_VALID) {
+            status = OR_WORLD_RULES_VALID;
+            OR_LOG(MOD_LOG_LEVEL_INFO, "[WORLD_RULES_LOAD] fingerprint=%llu source=private_save", (unsigned long long)fingerprint);
+        } else {
+            status = or_world_rules_create(&g_adapter.world_rules, g_adapter.config, progress, terrain, weather,
+                                           is_night, session, UINT64_C(0x4f52494700000022), fingerprint);
+            world_rules_save(fingerprint, &g_adapter.world_rules);
+        }
         g_adapter.world_rules_session = session;
+        g_adapter.broadcast.last_daily_broadcast_wall_second = 0u;
         g_adapter.world_rule_revision = 1u;
         g_adapter.rule_summary_emitted = false;
+        g_adapter.last_daily_broadcast_wall_second = 0u;
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[WORLD_RULES] session=%llu status=%d selected=%u revision=1 "
-               "gameDay=%llu source=seeded_snapshot memory=active",
+               "gameDay=%llu source=%s memory=active",
                (unsigned long long)session, (int)status,
                (unsigned)g_adapter.world_rules.snapshot.selected_count,
-               (unsigned long long)game_day);
+               (unsigned long long)game_day, status == OR_WORLD_RULES_VALID ? "saved_or_seeded" : "safe_mode");
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[WORLD_RULE_MEMORY] session=%llu revision=1 history=%u "
                "nextRefreshDay=%llu persistence=runtime_session",
@@ -1534,6 +1681,9 @@ static void ensure_world_rules(OR_ProgressStage progress,
             g_adapter.world_rules.refresh_count + 1u > old_revision) {
             g_adapter.world_rule_revision = g_adapter.world_rules.refresh_count + 1u;
             g_adapter.rule_summary_emitted = false;
+            g_adapter.last_daily_broadcast_wall_second = 0u;
+            g_adapter.broadcast.last_daily_broadcast_wall_second = 0u;
+            world_rules_save(fingerprint, &g_adapter.world_rules);
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[WORLD_RULES_REFRESH] session=%llu gameDay=%llu revision=%llu "
                    "selected=%u history=%u nextRefreshDay=%llu source=three_day_cycle",
@@ -1869,6 +2019,11 @@ static void probe_color_member(patch_handle_t instance, uint32_t npc_type) {
 
 static bool write_name_color_marker(patch_handle_t instance, OR_EliteTier tier,
                                     uint32_t npc_type) {
+    /* The approved visual uses only the foot sprite. Never tint the NPC
+     * body/name through NPC.color; doing so made every tier look neon. */
+    (void)instance; (void)tier; (void)npc_type;
+    return false;
+#if 0
     uint64_t packed;
     uint8_t rgba[4];
     uint64_t readback = 0u;
@@ -1892,6 +2047,49 @@ static bool write_name_color_marker(patch_handle_t instance, OR_EliteTier tier,
            (unsigned)rgba[1], (unsigned)rgba[2], (unsigned)rgba[3],
            (unsigned long long)readback);
     return true;
+#endif
+}
+
+/* NewDust needs unavailable struct-by-value FFI on this device. Use the
+ * verified NPC.color value write for a blood-free tier breathing flash. */
+static void write_tier_color_breath(patch_handle_t instance, OR_EliteTier tier,
+                                    uint32_t npc_type, bool bright,
+                                    uint32_t ai_tick) {
+    /* Disabled: foot_fx_atlas supplies its own colours. */
+    (void)instance; (void)tier; (void)npc_type; (void)bright; (void)ai_tick;
+    return;
+#if 0
+    uint8_t rgba[4];
+    uint64_t packed;
+    static uint32_t pulse_log_samples;
+    if (!instance || !g_adapter.runtime ||
+        !g_adapter.runtime->capabilities.color_marker_ready ||
+        !g_adapter.runtime->field_color) return;
+    switch (tier) {
+    case OR_TIER_ALTERED:
+        /* Each tier keeps its own hue in both phases; the crest is brighter
+         * without collapsing all tiers to the same white tint. */
+        rgba[0] = bright ? 150u : 18u; rgba[1] = bright ? 255u : 170u; rgba[2] = bright ? 185u : 55u; break;
+    case OR_TIER_CALAMITY:
+        rgba[0] = bright ? 100u : 18u; rgba[1] = bright ? 225u : 85u; rgba[2] = 255u; break;
+    case OR_TIER_APOCALYPSE:
+        rgba[0] = 255u; rgba[1] = bright ? 85u : 12u; rgba[2] = bright ? 255u : 160u; break;
+    default:
+        return;
+    }
+    rgba[3] = 255u;
+    packed = (uint64_t)rgba[0] | ((uint64_t)rgba[1] << 8) |
+             ((uint64_t)rgba[2] << 16) | ((uint64_t)rgba[3] << 24);
+    if (!field_write(g_adapter.runtime->field_color, instance, &packed)) return;
+    if (pulse_log_samples < 64u) {
+        ++pulse_log_samples;
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[VISUAL_COLOR_PULSE] type=%u tier=%s phase=%s tick=%u rgba=%u,%u,%u,%u",
+               (unsigned)npc_type, or_elite_tier_name(tier), bright ? "bright" : "rest",
+               (unsigned)ai_tick, (unsigned)rgba[0], (unsigned)rgba[1],
+               (unsigned)rgba[2], (unsigned)rgba[3]);
+    }
+#endif
 }
 
 static bool write_given_name_marker(patch_handle_t instance,
@@ -2071,6 +2269,9 @@ static bool read_vanilla_stats(patch_handle_t instance,
     float slots = 1.0f;
     float value = 0.0f;
     bool local_active = false;
+    bool boss_ok;
+    bool town_ok;
+    bool friendly_ok;
     if (failed_field) *failed_field = NULL;
     if (!g_adapter.runtime || !stats || !npc_type) {
         if (failed_field) *failed_field = "arguments/runtime";
@@ -2107,9 +2308,18 @@ static bool read_vanilla_stats(patch_handle_t instance,
     if (is_boss) *is_boss = false;
     if (is_town) *is_town = false;
     if (is_friendly) *is_friendly = false;
-    (void)read_bool(g_adapter.runtime->field_boss, instance, is_boss);
-    (void)read_bool(g_adapter.runtime->field_town_npc, instance, is_town);
-    (void)read_bool(g_adapter.runtime->field_friendly, instance, is_friendly);
+    /* These fields are not optional for the rewrite decision.  Previously a
+     * failed read silently left friendly=false, which could turn a critter or
+     * town-side NPC into a rewrite candidate.  SAFE-OFF is required here. */
+    boss_ok = read_bool(g_adapter.runtime->field_boss, instance, is_boss);
+    town_ok = read_bool(g_adapter.runtime->field_town_npc, instance, is_town);
+    friendly_ok = read_bool(g_adapter.runtime->field_friendly, instance, is_friendly);
+    if (!boss_ok || !town_ok || !friendly_ok) {
+        if (failed_field) {
+            *failed_field = !boss_ok ? "boss" : (!town_ok ? "townNPC" : "friendly");
+        }
+        return false;
+    }
     if (active) *active = local_active;
     *npc_type = type > 0 ? (uint32_t)type : 0u;
     stats->life_max = life_max > 0 ? life_max : 0;
@@ -2227,6 +2437,17 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     const OR_EliteRecord *record;
     if (!binding || !vanilla || !g_adapter.runtime || !g_adapter.config ||
         !g_adapter.state || binding->roll_resolved) return false;
+    /* A rewrite candidate must be able to damage the player through the
+     * normal hostile NPC path. This is a second, independent safety gate for
+     * critters/pets in case a mobile build transiently reports friendly=false
+     * while their SetDefaults fields are settling. */
+    if (vanilla->damage <= 0) {
+        binding->roll_resolved = true;
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[ELIGIBILITY] type=%u damage=%d decision=skip reason=no_hostile_contact_damage",
+               (unsigned)npc_type, (int)vanilla->damage);
+        return false;
+    }
     progress = current_progress();
     mode = current_mode();
     /* A known multiplayer client must not mutate the authoritative state. If
@@ -2292,6 +2513,18 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.max_active_elites = g_adapter.config->max_active_elites;
     context.transient_prepare = false;
     context.vanilla = *vanilla;
+    {
+        static uint32_t eligibility_log_samples;
+        if (eligibility_log_samples < 128u) {
+            ++eligibility_log_samples;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[ELIGIBILITY] type=%u friendly=%s townNPC=%s boss=%s damage=%d decision=%s",
+                   (unsigned)npc_type, is_friendly ? "yes" : "no",
+                   is_town ? "yes" : "no", is_boss ? "yes" : "no",
+                   (int)vanilla->damage,
+                   (is_friendly || is_town || is_boss || vanilla->damage <= 0) ? "skip" : "roll");
+        }
+    }
     memset(&spawn, 0, sizeof(spawn));
     {
         static uint32_t roll_log_samples;
@@ -2479,8 +2712,8 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                    (unsigned)npc_type);
         }
     }
-    /* Do not emit a spawn burst: the magic arc is refreshed by the
-     * low-density aura path below, avoiding a fireworks-like flash. */
+    /* Particle emission remains safely unavailable on this kernel. The
+     * verified tier-color marker below supplies the initial visual state. */
     {
         const char *prefix = tier_prefix(spawn.tier);
         const char *name_reason = NULL;
@@ -2494,6 +2727,16 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
                "[REWRITE_MARK] concept=重构体 tier=%s prefix=%s marker=%s",
                or_elite_tier_name(spawn.tier), prefix ? prefix : "unavailable",
                name_ok ? "GivenName" : "log-only");
+        /* NewDust is unavailable on this device; make the verified color
+         * marker itself provide a visible spawn flash as the fallback. */
+        write_tier_color_breath(instance, spawn.tier, npc_type, true, 0u);
+        (void)or_visual_effects_emit_spawn(g_adapter.runtime, instance,
+                                           spawn.tier, npc_type,
+                                           context.archetype);
+        if (spawn.tier == OR_TIER_APOCALYPSE) {
+            (void)or_visual_effects_emit_apocalypse_arrival(g_adapter.runtime,
+                                                            instance, npc_type);
+        }
     }
     /* Main.NewText is opened for every committed rewrite tier.
      * tiers. The ABI was verified during runtime probing, and the call is
@@ -2518,7 +2761,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
            "[AI_MODE] colorMarker=%s loot=return-buffer-guarded-writeback-check "
-           "specialAI=full-factory-actions; goblin magic arc=low-density NewDust; "
+           "specialAI=full-factory-actions; origin residue=low-density NewDust; "
            "name marker active; NewText notice enabled for calamity+",
            g_adapter.runtime->capabilities.color_marker_ready ? "enabled" : "safe-off");
     OR_LOG(MOD_LOG_LEVEL_INFO, "Elite committed: concept=重构体 prefix=%s type=%u tier=%s progress=%s mode=%s",
@@ -2625,12 +2868,22 @@ static bool spawn_ai_projectiles(patch_handle_t instance,
     uint32_t requested;
     uint32_t spawned = 0u;
     uint32_t i;
+    uint32_t interval;
     float direction;
     if (!instance || !record || !g_adapter.runtime ||
         !g_adapter.runtime->projectile_new_projectile_signature_ready ||
         !g_adapter.runtime->method_projectile_new_projectile ||
         !patchlib_method_invoke_args ||
-        (ai_tick % (template == OR_AI_TEMPLATE_FAN_SHOT ? 18u : 24u)) != 0u ||
+        g_adapter.ai_projectiles_this_tick >= 12u) return false;
+    interval = template == OR_AI_TEMPLATE_FAN_SHOT ? 18u : 24u;
+    switch (record->mode) {
+        case OR_MODE_EXPERT: interval = interval * 85u / 100u; break;
+        case OR_MODE_MASTER: interval = interval * 70u / 100u; break;
+        case OR_MODE_ZENITH: interval = interval * 60u / 100u; break;
+        default: break;
+    }
+    if (interval < 8u) interval = 8u;
+    if ((ai_tick % interval) != 0u ||
         g_adapter.ai_projectiles_this_tick >= 12u) return false;
     if (!read_vector2_field(g_adapter.runtime->field_position_probe, instance, position) ||
         !read_vector2_field(g_adapter.runtime->field_velocity_probe, instance, velocity)) return false;
@@ -2783,11 +3036,41 @@ static bool record_is_flying(const OR_EliteRecord *record) {
                OR_AI_ARCHETYPE_FLYING && known;
 }
 
+static bool record_is_jump_melee(const OR_EliteRecord *record) {
+    /* aiStyle=1 is the native slime-style jump family observed in the
+     * runtime log (for example Green Slime, NPC type 1). Its horizontal
+     * momentum is part of the vanilla jump arc, so it must not use the
+     * generic fighter-lunge braking path. */
+    return record && record->native_ai_style == 1;
+}
+
+static bool record_is_zombie_fighter(const OR_EliteRecord *record) {
+    /* Zombie variants share aiStyle=3 with fighters, but their native
+     * walk/jump pursuit must not be overwritten by a generic lunge. */
+    if (!record || record->native_ai_style != 3) return false;
+    switch (record->npc_type) {
+    case 3u: case 132u: case 186u: case 187u: case 188u:
+    case 189u: case 200u: case 430u: case 431u: case 432u: case 433u:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool record_uses_melee_lunge(const OR_EliteRecord *record) {
+    OR_AiTemplate template;
+    if (!record || record_is_flying(record) || record_is_jump_melee(record) ||
+        record_is_zombie_fighter(record)) return false;
+    template = record->ai_plan.has_finisher
+        ? record->ai_plan.finisher : record->ai_plan.primary;
+    return template == OR_AI_TEMPLATE_LUNGE || template == OR_AI_TEMPLATE_DASH;
+}
+
 static void capture_flying_dive_target(OR_NativeBinding *binding,
                                        const OR_EliteRecord *record,
                                        uint32_t ai_tick) {
     if (!binding || !record || !record_is_flying(record) ||
-        binding->ai_runtime.flying_dive_target_known) return;
+        (binding->ai_runtime.flying_dive_target_known && (ai_tick % 12u) != 0u)) return;
     if (!g_adapter.last_player_position_valid) {
         static uint32_t unavailable_logs;
         if (unavailable_logs < 8u) {
@@ -2833,6 +3116,12 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
     OR_AiTemplate template;
     bool rage_active;
     bool flying;
+    bool jump_melee;
+    bool zombie_fighter;
+    bool ranged;
+    bool has_player_position = false;
+    float player_distance = 0.0f;
+    bool dash_window = false;
     float weather_multiplier = 1.0f;
     unsigned char position_raw[8] = {0};
     float position[2] = {0.0f, 0.0f};
@@ -2844,17 +3133,68 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
         !ai_runtime || (ai_runtime->phase != OR_AI_PHASE_ACTIVE &&
                          !(ai_runtime->phase == OR_AI_PHASE_TELEGRAPH &&
                            record_is_flying(record))) ||
-        (ai_tick % 6u) != 0u) return;
+        (ai_tick % 2u) != 0u) return;
     /* Flying elites use Telegraph for air patrol and Active for the locked
      * dive. Other archetypes only affect movement during Active. */
     template = record->ai_plan.has_finisher
         ? record->ai_plan.finisher : record->ai_plan.primary;
     flying = record_is_flying(record);
+    jump_melee = !flying && record_is_jump_melee(record);
+    zombie_fighter = !flying && record_is_zombie_fighter(record);
+    ranged = or_ai_classify_native_type(record->npc_type,
+                                        record->native_ai_style, NULL) ==
+             OR_AI_ARCHETYPE_RANGED;
     rage_active = template == OR_AI_TEMPLATE_RAGE && ai_runtime->rage_triggered;
     if (template == OR_AI_TEMPLATE_RAGE && !rage_active && !flying) return;
+    /* Ranged vanilla NPCs already contain their own spacing and walk logic.
+     * Do not overwrite their horizontal velocity with the elite movement
+     * layer; keep only the verified projectile behavior below. */
+    if (ranged) {
+        reset_ai_factory_budget();
+        if (template == OR_AI_TEMPLATE_PROJECTILE_BURST ||
+            template == OR_AI_TEMPLATE_FAN_SHOT ||
+            template == OR_AI_TEMPLATE_PHASE) {
+            (void)spawn_ai_projectiles(instance, record, template, ai_tick);
+        }
+        return;
+    }
     if (!read_vector2_field(g_adapter.runtime->field_velocity_probe, instance,
                            velocity)) return;
     direction = velocity[0] < -0.05f ? -1.0f : 1.0f;
+    if (g_adapter.last_player_position_valid &&
+        read_position_raw(g_adapter.runtime->field_position_probe, instance, position_raw)) {
+        memcpy(&position[0], position_raw, sizeof(float));
+        memcpy(&position[1], position_raw + sizeof(float), sizeof(float));
+        has_player_position = isfinite(position[0]) && isfinite(position[1]);
+        if (has_player_position) {
+            direction = g_adapter.last_player_position[0] < position[0] ? -1.0f : 1.0f;
+            {
+                float dx = g_adapter.last_player_position[0] - position[0];
+                float dy = g_adapter.last_player_position[1] - position[1];
+                player_distance = sqrtf(dx * dx + dy * dy);
+                if (!isfinite(player_distance)) player_distance = 0.0f;
+            }
+        }
+    }
+    /* Without a verified player position, a slime-style NPC must retain its
+     * complete vanilla jump behavior. The old fallback inferred a direction
+     * from transient velocity and then overwrote that same velocity, which
+     * made stationary slimes look passive or jump the wrong way. */
+    /* Zombie fighters used to return here, leaving them with no visible
+     * reconstruction behavior at all.  Keep their native vertical jump, but
+     * let the active phase add a target-facing ground burst below. */
+    if (jump_melee && !has_player_position) {
+        static uint32_t slime_vanilla_logs;
+        if (slime_vanilla_logs < 32u) {
+            ++slime_vanilla_logs;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[AI_JUMP_MELEE] type=%u aiStyle=%d state=vanilla_preserved "
+                   "reason=player_position_unavailable tick=%u",
+                   (unsigned)npc_type, (int)record->native_ai_style,
+                   (unsigned)ai_tick);
+        }
+        return;
+    }
     speed = record->tier == OR_TIER_APOCALYPSE ? 8.0f :
             (record->tier == OR_TIER_CALAMITY ? 6.0f : 4.5f);
     intensity = isfinite(record->ai_plan.intensity) && record->ai_plan.intensity > 0.0f
@@ -2870,12 +3210,25 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
     }
     speed *= weather_multiplier;
     if (flying) {
+        /* Native flying pursuit remains untouched. This only weakens the
+         * rewrite layer for melee flyers such as Eater of Souls. */
+        speed *= 0.70f;
         if (ai_runtime->phase == OR_AI_PHASE_TELEGRAPH) {
             float phase = ((float)ai_tick * 0.11f) +
                           ((float)(npc_type % 17u) * 0.37f);
-            float patrol_speed = speed * 0.42f;
-            velocity[0] = cosf(phase) * patrol_speed;
-            velocity[1] = sinf(phase * 1.37f) * patrol_speed * 0.75f;
+            float patrol_speed = speed * 0.32f;
+            float desired_x = cosf(phase) * patrol_speed;
+            float desired_y = sinf(phase * 1.37f) * patrol_speed * 0.75f;
+            if (has_player_position) {
+                desired_x += (g_adapter.last_player_position[0] - position[0]) * 0.025f;
+                desired_y += (g_adapter.last_player_position[1] - position[1]) * 0.018f;
+            }
+            if (desired_x > speed * 0.70f) desired_x = speed * 0.70f;
+            if (desired_x < -speed * 0.70f) desired_x = -speed * 0.70f;
+            if (desired_y > speed * 0.50f) desired_y = speed * 0.50f;
+            if (desired_y < -speed * 0.50f) desired_y = -speed * 0.50f;
+            velocity[0] += (desired_x - velocity[0]) * 0.18f;
+            velocity[1] += (desired_y - velocity[1]) * 0.18f;
             {
                 static uint32_t patrol_logs;
                 if (patrol_logs < 32u) {
@@ -2899,9 +3252,9 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
             dy = ai_runtime->flying_dive_target_y - position[1];
             distance = sqrtf(dx * dx + dy * dy);
             if (isfinite(distance) && distance > 8.0f) {
-                float dive_speed = speed * 1.55f;
-                velocity[0] = (dx / distance) * dive_speed;
-                velocity[1] = (dy / distance) * dive_speed;
+                float dive_speed = speed * 1.05f;
+                velocity[0] += ((dx / distance) * dive_speed - velocity[0]) * 0.18f;
+                velocity[1] += ((dy / distance) * dive_speed - velocity[1]) * 0.18f;
             } else {
                 velocity[0] = 0.0f;
                 velocity[1] = speed * 0.25f;
@@ -2929,14 +3282,43 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
     } else switch (template) {
         case OR_AI_TEMPLATE_LUNGE:
         case OR_AI_TEMPLATE_DASH:
-            velocity[0] = direction * speed;
+            if (jump_melee) {
+                /* Nudge only the horizontal component during an already
+                 * active native jump; vertical motion and its timing stay
+                 * wholly vanilla. This is intentionally gentler than the
+                 * fighter lunge and never runs without a real player target. */
+                float jump_target_speed = record->tier == OR_TIER_APOCALYPSE ? 2.70f :
+                    (record->tier == OR_TIER_CALAMITY ? 2.30f : 1.90f);
+                velocity[0] += (direction * jump_target_speed - velocity[0]) * 0.16f;
+                if (velocity[0] > jump_target_speed) velocity[0] = jump_target_speed;
+                if (velocity[0] < -jump_target_speed) velocity[0] = -jump_target_speed;
+            } else {
+                /* Keep the elite walking at long range. The stronger burst
+                 * is only armed inside a readable approach window. */
+                float engage_distance = record->tier == OR_TIER_APOCALYPSE ? 900.0f :
+                    (record->tier == OR_TIER_CALAMITY ? 780.0f : 660.0f);
+                float inner_distance = 58.0f;
+                dash_window = has_player_position &&
+                    player_distance > inner_distance &&
+                    player_distance <= engage_distance;
+                if (zombie_fighter && has_player_position) {
+                    float zombie_speed = speed * (player_distance <= engage_distance ? 0.82f : 0.46f);
+                    velocity[0] += (direction * zombie_speed - velocity[0]) * 0.28f;
+                } else if (dash_window) {
+                    velocity[0] += (direction * speed - velocity[0]) * 0.35f;
+                } else {
+                    float walk_speed = speed *
+                        (player_distance > engage_distance ? 0.48f : 0.28f);
+                    velocity[0] += (direction * walk_speed - velocity[0]) * 0.16f;
+                }
+            }
             break;
         case OR_AI_TEMPLATE_PROJECTILE_BURST:
         case OR_AI_TEMPLATE_FAN_SHOT:
             /* Keep vanilla shots until the exact NewProjectile overload is
              * verified; the verified movement layer still constrains range. */
-            velocity[0] = direction * (speed * 0.65f);
-            velocity[1] = sinf((float)ai_tick * 0.18f) * 2.0f;
+            velocity[0] += (direction * (speed * 0.65f) - velocity[0]) * 0.22f;
+            velocity[1] += (sinf((float)ai_tick * 0.18f) * 2.0f - velocity[1]) * 0.16f;
             break;
         case OR_AI_TEMPLATE_BURROW:
             /* Worms keep their native segment count and never teleport. */
@@ -2965,13 +3347,23 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
             ++applied_count;
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[AI_SPECIAL_APPLY] type=%u tier=%s phase=%s archetype=%s "
-                   "template=%s velocity=%.2f,%.2f write=ok",
+                   "template=%s velocity=%.2f,%.2f write=ok movement=%s",
                    (unsigned)npc_type, or_elite_tier_name(record->tier),
                    or_ai_phase_name(ai_runtime->phase),
                    or_ai_archetype_name(or_ai_classify_native_type(
                        record->npc_type, record->native_ai_style, NULL)),
                    ai_template_name(template),
-                   (double)velocity[0], (double)velocity[1]);
+                   (double)velocity[0], (double)velocity[1],
+                   jump_melee ? "native_jump_nudge" :
+                       (zombie_fighter ? "fighter_target_burst" :
+                        (dash_window ? "near_player_dash" : "approach_walk")));
+            if (!jump_melee && has_player_position &&
+                (applied_count <= 64u)) {
+                OR_LOG(MOD_LOG_LEVEL_INFO,
+                       "[AI_DISTANCE_GATE] type=%u distance=%.1f dash=%s",
+                       (unsigned)npc_type, (double)player_distance,
+                       dash_window ? "armed" : "walking");
+            }
         }
     }
     reset_ai_factory_budget();
@@ -3020,12 +3412,23 @@ static void ai_postfix(
     observe_player_rules(instance);
     if (ORIGINREWRITE_ENABLE_BOSS_DIALOG && active && is_boss && vanilla.life_max > 0) {
         OR_BossDialogEvent boss_event;
+        uint64_t dialog_tick;
         float boss_ratio = (float)vanilla.life_current / (float)vanilla.life_max;
-        g_adapter.boss_active_by_type[npc_type] = true;
-        if (npc_type < 1024u &&
-            or_boss_dialog_adapter_observe(&g_adapter.boss_dialog_by_type[npc_type], boss_ratio, &boss_event)) {
+        uint32_t dialog_key = boss_dialog_key(npc_type);
+        g_adapter.boss_active_by_type[dialog_key] = true;
+        if (dialog_key < 1024u &&
+            or_boss_dialog_adapter_observe(&g_adapter.boss_dialog_by_type[dialog_key], boss_ratio, &boss_event)) {
+            dialog_tick = update_tick();
             bool shown = or_broadcast_emit_boss_dialog(&g_adapter.broadcast,
-                g_adapter.runtime, npc_type, boss_event, update_tick());
+                g_adapter.runtime, dialog_key, boss_event, dialog_tick);
+            if (!shown && boss_event != OR_BOSS_DIALOG_DEATH &&
+                dialog_tick < g_adapter.broadcast.boss_lock_until_tick) {
+                /* The threshold was observed, but the broadcast channel may
+                 * still be locked by the arrival card. Retry on a later AI
+                 * tick instead of silently consuming the half-health line. */
+                or_boss_dialog_adapter_requeue(
+                    &g_adapter.boss_dialog_by_type[dialog_key], boss_event);
+            }
             OR_LOG(MOD_LOG_LEVEL_INFO, "[BOSS_DIALOG_EVENT] type=%u event=%s shown=%s readOnly=yes",
                    (unsigned)npc_type,
                    boss_event == OR_BOSS_DIALOG_HALF ? "half" :
@@ -3083,9 +3486,16 @@ static void ai_postfix(
             clear_binding(binding);
             return;
         }
-        (void)or_visual_effects_emit_aura(g_adapter.runtime, instance,
-                                           record->tier, npc_type,
-                                           (uint32_t)binding->ai_ticks);
+        if ((binding->ai_ticks % 12u) == 0u) {
+            write_tier_color_breath(instance, record->tier, npc_type,
+                                    ((binding->ai_ticks / 12u) & 1u) != 0u,
+                                    (uint32_t)binding->ai_ticks);
+        }
+        (void)or_visual_effects_emit_aura(
+            g_adapter.runtime, instance, record->tier, npc_type,
+            or_ai_classify_native_type(record->npc_type,
+                                       record->native_ai_style, NULL),
+            (uint32_t)binding->ai_ticks);
         current_ratio = vanilla.life_max > 0
             ? (float)vanilla.life_current / (float)vanilla.life_max : 0.0f;
         if (!isfinite(current_ratio) || current_ratio < 0.0f) current_ratio = 0.0f;
@@ -3101,9 +3511,15 @@ static void ai_postfix(
             (void)or_ai_tick(&record->ai_plan, &binding->ai_runtime,
                              (uint32_t)binding->ai_ticks);
             phase_after = binding->ai_runtime.phase;
+            if (shadow_started && record_uses_melee_lunge(record)) {
+                write_tier_color_breath(instance, record->tier, npc_type, true,
+                                        (uint32_t)binding->ai_ticks);
+                (void)or_visual_effects_emit_melee_telegraph(
+                    g_adapter.runtime, instance, record->tier, npc_type,
+                    (uint32_t)binding->ai_ticks);
+            }
             if (record_is_flying(record)) {
-                if (phase_after == OR_AI_PHASE_ACTIVE &&
-                    phase_before != OR_AI_PHASE_ACTIVE) {
+                if (phase_after == OR_AI_PHASE_ACTIVE) {
                     capture_flying_dive_target(binding, record,
                                                (uint32_t)binding->ai_ticks);
                 } else if (phase_before == OR_AI_PHASE_ACTIVE &&
@@ -3222,6 +3638,40 @@ static bool install_prefix(patch_handle_t method, prefix_callback_t callback,
     if (hook_id == PATCH_HOOK_INVALID_ID) return false;
     *out_id = hook_id;
     return true;
+}
+
+static void head_marker_frame_postfix(patch_handle_t instance, void **args,
+                                      void *result,
+                                      const patch_method_signature_t *sig_info) {
+    static uint32_t frame_samples;
+    float screen_pos[2];
+    bool player_dead_now;
+    size_t i;
+    (void)instance; (void)args; (void)result; (void)sig_info;
+    if (frame_samples < 8u) {
+        ++frame_samples;
+        OR_LOG(MOD_LOG_LEVEL_WARNING, "[FOOT_FX_FRAME] sample=%u installed=%s",
+               (unsigned)frame_samples, g_adapter.installed ? "yes" : "no");
+    }
+    /* During death/respawn the vanilla renderer changes SpriteBatch state and
+     * the local-player identity is temporarily invalid. Do not inject a
+     * world draw into that transition; it can suppress the death/UI layers. */
+    if (!g_adapter.installed || !g_adapter.runtime || !g_adapter.state ||
+        !g_adapter.last_player_position_valid ||
+        g_adapter.player_dead_cached ||
+        !or_head_marker_get_screen_position(screen_pos)) return;
+    /* Direct field read only; no managed getter is invoked from rendering. */
+    if (g_adapter.last_player_identity &&
+        or_head_marker_read_player_dead(g_adapter.last_player_identity, &player_dead_now) &&
+        player_dead_now) return;
+    for (i = 0; i < OR_MAX_TRACKED_NPCS; ++i) {
+        OR_NativeBinding *binding = &g_adapter.bindings[i];
+        const OR_EliteRecord *record;
+        if (!binding->occupied || !binding->elite || !binding->instance) continue;
+        record = or_state_find_const(g_adapter.state, binding->key);
+        if (!record || record->tier <= OR_TIER_NONE || record->tier >= OR_TIER_COUNT) continue;
+        or_head_marker_draw(g_adapter.runtime, binding->instance, record->tier, screen_pos);
+    }
 }
 
 static void display_name_color_postfix(patch_handle_t instance, void **args,
@@ -3509,6 +3959,21 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
         ai_hook_ok = install_postfix(runtime->method_ai, ai_postfix,
                                      &runtime->ai_hook_id);
     }
+    if (or_head_marker_probe(runtime)) {
+        patch_handle_t draw_method = or_head_marker_frame_method();
+        if (draw_method && runtime->head_marker_hook_id == PATCH_HOOK_INVALID_ID &&
+            install_postfix(draw_method, head_marker_frame_postfix,
+                            &runtime->head_marker_hook_id)) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[FOOT_FX_HOOK] installed=yes mode=draw_npcs_frame_postfix");
+        } else {
+            OR_LOG(MOD_LOG_LEVEL_WARNING,
+                   "[FOOT_FX_HOOK] installed=no reason=hook_install_failed safe=off");
+        }
+    } else {
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[FOOT_FX_HOOK] installed=no reason=capability_probe_failed safe=off");
+    }
     if (runtime->method_strike_npc &&
         or_runtime_signature_matches(runtime->method_strike_npc, true,
                                      PATCH_INT32,
@@ -3545,8 +4010,8 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
            "[SAFE_MODE] colorMarker=%s extra-loot=enabled special-AI=enabled; "
-           "goblin magic arc=low-density NewDust; name marker active; NewText calamity+",
-           runtime->capabilities.color_marker_ready ? "enabled" : "safe-off");
+           "origin residue=low-density NewDust; name marker active; NewText calamity+",
+           "safe-off");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
     /* This is the verified NPCLoot observation boundary. A separate
@@ -3580,5 +4045,6 @@ void or_adapter_stop(void) {
     for (i = 0; i < OR_MAX_TRACKED_NPCS; ++i) {
         if (g_adapter.bindings[i].occupied) clear_binding(&g_adapter.bindings[i]);
     }
+    or_head_marker_reset();
     memset(&g_adapter, 0, sizeof(g_adapter));
 }

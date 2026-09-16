@@ -106,10 +106,19 @@ bool or_ai_build_plan(const OR_Config *config,
     memset(out_plan, 0, sizeof(*out_plan));
     out_plan->primary = or_primary_for_archetype(archetype);
     out_plan->intensity = config->tiers[tier].ai_intensity;
-    out_plan->telegraph_ticks = tier == OR_TIER_ALTERED ? 24u : tier == OR_TIER_CALAMITY ? 18u : 14u;
-    out_plan->active_ticks = tier == OR_TIER_ALTERED ? 12u : tier == OR_TIER_CALAMITY ? 16u : 20u;
-    out_plan->recovery_ticks = tier == OR_TIER_ALTERED ? 16u : tier == OR_TIER_CALAMITY ? 12u : 10u;
-    out_plan->cooldown_ticks = tier == OR_TIER_ALTERED ? 45u : tier == OR_TIER_CALAMITY ? 34u : 26u;
+    /* Melee actions need a readable wind-up and recovery window.  The old
+     * cooldowns allowed repeated lunges about every 5 seconds and felt like
+     * uninterrupted charging, especially when native jumping carried the
+     * horizontal velocity into the next action. */
+    out_plan->telegraph_ticks = tier == OR_TIER_ALTERED ? 30u : tier == OR_TIER_CALAMITY ? 24u : 18u;
+    out_plan->active_ticks = tier == OR_TIER_ALTERED ? 10u : tier == OR_TIER_CALAMITY ? 12u : 14u;
+    out_plan->recovery_ticks = tier == OR_TIER_ALTERED ? 18u : tier == OR_TIER_CALAMITY ? 14u : 12u;
+    out_plan->cooldown_ticks = tier == OR_TIER_ALTERED ? 90u : tier == OR_TIER_CALAMITY ? 72u : 60u;
+    if (archetype == OR_AI_ARCHETYPE_FLYING) {
+        /* Native flying pursuit is already strong; make the added dive an
+         * occasional action instead of sustained pressure. */
+        out_plan->cooldown_ticks += 60u;
+    }
 
     or_prng_seed(&rng, seed ^ UINT64_C(0x41495f504c414e31));
     if (tier == OR_TIER_ALTERED) {

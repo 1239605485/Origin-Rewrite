@@ -12,6 +12,7 @@ extern "C" {
 bool or_adapter_start(OR_Runtime *runtime,
                       OR_Config *config,
                       OR_StateStore *state);
+void or_adapter_set_private_dir(const char *private_dir);
 void or_adapter_stop(void);
 
 void or_adapter_observe_death_state(patch_handle_t instance,

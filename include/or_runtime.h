@@ -172,6 +172,8 @@ typedef struct OR_Runtime {
     patch_hook_id_t display_name_hook_id_alt;
     patch_hook_id_t display_name_hook_id_third;
     patch_hook_id_t mouse_text_hook_ids[OR_MOUSE_TEXT_METHOD_LIMIT];
+    patch_hook_id_t head_marker_hook_id;
+    patch_hook_id_t head_marker_hook_id_lit;
     OR_RuntimeCapabilities capabilities;
 } OR_Runtime;
 

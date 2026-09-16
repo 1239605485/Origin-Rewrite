@@ -1,6 +1,7 @@
 #include "or_visual_effects.h"
 
 #include "or_config.h"
+#include "or_ai.h"
 #include "or_log.h"
 #include "tefkernel/patchlib/field.h"
 #include "tefkernel/patchlib/method.h"
@@ -23,6 +24,30 @@
  * argument (the green tier appeared yellow). This material is chosen so the
  * already verified Color-by-value argument remains the source of truth. */
 #define OR_DUST_TINTABLE 4
+
+static bool emit_hit_effect_fallback(const OR_Runtime *runtime,
+                                     patch_handle_t instance,
+                                     OR_EliteTier tier,
+                                     uint32_t npc_type,
+                                     const char *trigger) {
+    int32_t hit_direction = 0;
+    double visual_damage = tier == OR_TIER_APOCALYPSE ? 3.0 :
+                           (tier == OR_TIER_CALAMITY ? 2.0 : 1.0);
+    void *args[2] = {&hit_direction, &visual_damage};
+    if (!runtime || !instance || !runtime->capabilities.visual_hit_effect_ready ||
+        !runtime->method_visual_hit_effect || !patchlib_method_invoke_args) return false;
+    if (!patchlib_method_invoke_args(runtime->method_visual_hit_effect, instance,
+                                     NULL, args)) {
+        OR_LOG(MOD_LOG_LEVEL_WARNING,
+               "[VISUAL_EFFECT_SKIP] type=%u tier=%s effect=HitEffectFallback reason=invoke_failed trigger=%s",
+               (unsigned)npc_type, or_elite_tier_name(tier), trigger);
+        return false;
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[VISUAL_EFFECT_COMMIT] type=%u tier=%s effect=HitEffectFallback mode=vanilla_hit_pulse trigger=%s damage=%.1f low_density=yes",
+           (unsigned)npc_type, or_elite_tier_name(tier), trigger, visual_damage);
+    return true;
+}
 
 static bool emit_spawn_offset(const OR_Runtime *runtime,
                               patch_handle_t instance,
@@ -83,10 +108,15 @@ static bool emit_spawn_offset(const OR_Runtime *runtime,
         !runtime->capabilities.dust_value_invoke_ready ||
         !runtime->method_dust_new_dust || !runtime->field_position_probe ||
         !patchlib_field_get_value) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[VISUAL_EFFECT_SKIP] type=%u tier=%s effect=NewDust "
-               "reason=abi_not_verified",
-               (unsigned)npc_type, or_elite_tier_name(tier));
+        static uint32_t abi_skip_logs;
+        if (abi_skip_logs < 4u) {
+            ++abi_skip_logs;
+            OR_LOG(MOD_LOG_LEVEL_WARNING,
+                   "[VISUAL_EFFECT_DISABLED] effect=NewDust reason=abi_not_verified "
+                   "required=dust_new_dust+struct_value_invoke policy=SAFE_OFF "
+                   "type=%u tier=%s",
+                   (unsigned)npc_type, or_elite_tier_name(tier));
+        }
         return false;
     }
 
@@ -176,15 +206,51 @@ static bool emit_spawn_offset(const OR_Runtime *runtime,
 bool or_visual_effects_emit_spawn(const OR_Runtime *runtime,
                                   patch_handle_t instance,
                                   OR_EliteTier tier,
-                                  uint32_t npc_type) {
-    return emit_spawn_offset(runtime, instance, tier, npc_type,
-                             0.0f, 0.0f, 0.0f, -0.10f);
+                                  uint32_t npc_type,
+                                  OR_AiArchetype archetype) {
+    static const float altered[2][4] = {
+        {-8.0f, -4.0f, 0.16f, -0.12f}, {8.0f, 4.0f, -0.16f, -0.08f}
+    };
+    static const float calamity[3][4] = {
+        {-11.0f, 5.0f, 0.20f, -0.10f}, {0.0f, -12.0f, 0.0f, -0.22f},
+        {11.0f, 5.0f, -0.20f, -0.10f}
+    };
+    static const float apocalypse[4][4] = {
+        {-14.0f, 0.0f, 0.24f, -0.12f}, {0.0f, -16.0f, 0.0f, -0.28f},
+        {14.0f, 0.0f, -0.24f, -0.12f}, {0.0f, 8.0f, 0.0f, -0.06f}
+    };
+    const float (*motes)[4] = altered;
+    unsigned count = 2u;
+    unsigned i;
+    unsigned emitted = 0u;
+    if (!runtime || !runtime->capabilities.dust_new_dust_ready)
+        return emit_hit_effect_fallback(runtime, instance, tier, npc_type, "spawn");
+    if (tier == OR_TIER_CALAMITY) { motes = calamity; count = 3u; }
+    else if (tier == OR_TIER_APOCALYPSE) { motes = apocalypse; count = 4u; }
+    if (archetype == OR_AI_ARCHETYPE_FLYING) {
+        /* Flying entities leave the rupture slightly above their center. */
+        for (i = 0u; i < count; ++i) {
+            float y = motes[i][1] - 8.0f;
+            if (emit_spawn_offset(runtime, instance, tier, npc_type,
+                                  motes[i][0], y, motes[i][2], motes[i][3])) ++emitted;
+        }
+    } else {
+        for (i = 0u; i < count; ++i)
+            if (emit_spawn_offset(runtime, instance, tier, npc_type,
+                                  motes[i][0], motes[i][1], motes[i][2], motes[i][3])) ++emitted;
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[VISUAL_SPAWN] type=%u tier=%s requested=%u emitted=%u style=rupture archetype=%s",
+           (unsigned)npc_type, or_elite_tier_name(tier), count, emitted,
+           or_ai_archetype_name(archetype));
+    return emitted != 0u;
 }
 
 bool or_visual_effects_emit_aura(const OR_Runtime *runtime,
                                  patch_handle_t instance,
                                  OR_EliteTier tier,
                                  uint32_t npc_type,
+                                 OR_AiArchetype archetype,
                                  uint32_t ai_tick) {
     unsigned emitted = 0u;
     unsigned requested = 0u;
@@ -193,23 +259,24 @@ bool or_visual_effects_emit_aura(const OR_Runtime *runtime,
     float motes[5][4];
     float direction;
 
-    /* Goblin-sorcerer-inspired magic arc: a few restrained, colored motes
-     * hover above the head and drift upward slightly. It uses only the
-     * already-gated vanilla particle call; no renderer ABI is guessed. */
-    if ((ai_tick % 30u) != 0u || tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE)
+    /* The aura is a broken geometric glyph, not a circular halo. Keep it
+     * sparse so the effect reads clearly over every vanilla sprite. */
+    if ((ai_tick % 24u) != 0u || tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE)
         return false;
-    phase = ((ai_tick / 30u) + npc_type) & 1u;
+    if (!runtime || !runtime->capabilities.dust_new_dust_ready)
+        return emit_hit_effect_fallback(runtime, instance, tier, npc_type, "aura_cycle");
+    phase = ((ai_tick / 24u) + npc_type) & 1u;
     direction = phase ? -1.0f : 1.0f;
     memset(motes, 0, sizeof(motes));
     if (tier == OR_TIER_ALTERED) {
-        /* A small, two-mote green casting curl. */
+        /* Offset pair: the entity is slightly out of alignment. */
         requested = 2u;
         motes[0][0] = -5.0f * direction; motes[0][1] = -25.0f;
         motes[0][2] = 0.14f * direction; motes[0][3] = -0.16f;
         motes[1][0] = 4.0f * direction;  motes[1][1] = -32.0f;
         motes[1][2] = -0.09f * direction; motes[1][3] = -0.11f;
     } else if (tier == OR_TIER_CALAMITY) {
-        /* A three-mote blue casting curl with a clear central focus. */
+        /* Broken triangle, with an extra drift for flying bodies. */
         requested = 3u;
         motes[0][0] = -8.0f * direction; motes[0][1] = -25.0f;
         motes[0][2] = 0.17f * direction; motes[0][3] = -0.17f;
@@ -217,8 +284,12 @@ bool or_visual_effects_emit_aura(const OR_Runtime *runtime,
         motes[1][2] = 0.04f * direction; motes[1][3] = -0.13f;
         motes[2][0] = 8.0f * direction;  motes[2][1] = -27.0f;
         motes[2][2] = -0.15f * direction; motes[2][3] = -0.15f;
+        if (archetype == OR_AI_ARCHETYPE_FLYING) {
+            motes[1][1] = -40.0f;
+            motes[1][3] = -0.20f;
+        }
     } else {
-        /* Four violet motes make a restrained crown-like spell curl. */
+        /* Four-point rupture: a broken cross reserved for the top tier. */
         requested = 4u;
         motes[0][0] = -10.0f * direction; motes[0][1] = -25.0f;
         motes[0][2] = 0.18f * direction; motes[0][3] = -0.18f;
@@ -238,10 +309,85 @@ bool or_visual_effects_emit_aura(const OR_Runtime *runtime,
     }
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[VISUAL_AURA] type=%u tier=%s tick=%u requested=%u emitted=%u "
-           "particle_only=yes style=%s tintable=yes magic_arc=yes period_ticks=30 low_density=yes",
+           "particle_only=yes style=%s tintable=yes geometry=fracture period_ticks=24 low_density=yes archetype=%s",
            (unsigned)npc_type, or_elite_tier_name(tier), (unsigned)ai_tick,
            requested, emitted,
            tier == OR_TIER_ALTERED ? "single_arc" :
-               (tier == OR_TIER_CALAMITY ? "double_arc" : "crown_arc"));
+               (tier == OR_TIER_CALAMITY ? "broken_triangle" : "broken_cross"),
+           or_ai_archetype_name(archetype));
+    return emitted != 0u;
+}
+
+bool or_visual_effects_emit_melee_telegraph(const OR_Runtime *runtime,
+                                            patch_handle_t instance,
+                                            OR_EliteTier tier,
+                                            uint32_t npc_type,
+                                            uint32_t ai_tick) {
+    unsigned emitted = 0u;
+    unsigned requested = 0u;
+    unsigned i;
+    float motes[4][4];
+
+    if (tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE) return false;
+    if (!runtime || !runtime->capabilities.dust_new_dust_ready)
+        return emit_hit_effect_fallback(runtime, instance, tier, npc_type, "melee_telegraph");
+    memset(motes, 0, sizeof(motes));
+    /* A short ground-level convergence warns of the lunge without guessing
+     * which way the sprite faces. It fires once per telegraph phase, not per
+     * AI tick, so it cannot become a continuous trail. */
+    requested = tier == OR_TIER_ALTERED ? 2u :
+        (tier == OR_TIER_CALAMITY ? 3u : 4u);
+    motes[0][0] = -8.0f; motes[0][1] = 9.0f;
+    motes[0][2] = 0.16f; motes[0][3] = -0.10f;
+    motes[1][0] = 8.0f;  motes[1][1] = 9.0f;
+    motes[1][2] = -0.16f; motes[1][3] = -0.10f;
+    if (requested >= 3u) {
+        motes[2][0] = 0.0f; motes[2][1] = 5.0f;
+        motes[2][2] = 0.0f; motes[2][3] = -0.14f;
+    }
+    if (requested >= 4u) {
+        motes[3][0] = 0.0f; motes[3][1] = 13.0f;
+        motes[3][2] = 0.0f; motes[3][3] = -0.07f;
+    }
+    for (i = 0u; i < requested; ++i) {
+        if (emit_spawn_offset(runtime, instance, tier, npc_type,
+                              motes[i][0], motes[i][1],
+                              motes[i][2], motes[i][3])) {
+            ++emitted;
+        }
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[VISUAL_TELEGRAPH] type=%u tier=%s tick=%u requested=%u emitted=%u "
+           "particle_only=yes style=ground_converge one_shot=yes",
+           (unsigned)npc_type, or_elite_tier_name(tier), (unsigned)ai_tick,
+           requested, emitted);
+    return emitted != 0u;
+}
+
+bool or_visual_effects_emit_apocalypse_arrival(const OR_Runtime *runtime,
+                                                patch_handle_t instance,
+                                                uint32_t npc_type) {
+    static const float motes[4][4] = {
+        {-12.0f, -6.0f, 0.16f, -0.20f},
+        {0.0f, -17.0f, 0.0f, -0.27f},
+        {12.0f, -6.0f, -0.16f, -0.20f},
+        {0.0f, 6.0f, 0.0f, -0.10f}
+    };
+    unsigned emitted = 0u;
+    unsigned i;
+    if (!runtime || !runtime->capabilities.dust_new_dust_ready)
+        return emit_hit_effect_fallback(runtime, instance, OR_TIER_APOCALYPSE,
+                                        npc_type, "apocalypse_arrival");
+    for (i = 0u; i < 4u; ++i) {
+        if (emit_spawn_offset(runtime, instance, OR_TIER_APOCALYPSE, npc_type,
+                              motes[i][0], motes[i][1],
+                              motes[i][2], motes[i][3])) {
+            ++emitted;
+        }
+    }
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[VISUAL_ARRIVAL] type=%u tier=apocalypse requested=4 emitted=%u "
+           "particle_only=yes style=rift_arrival one_shot=yes",
+           (unsigned)npc_type, emitted);
     return emitted != 0u;
 }

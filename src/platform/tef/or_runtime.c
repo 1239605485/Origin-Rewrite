@@ -1100,6 +1100,8 @@ void or_runtime_init(OR_Runtime *runtime) {
     runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id_alt = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id_third = PATCH_HOOK_INVALID_ID;
+    runtime->head_marker_hook_id = PATCH_HOOK_INVALID_ID;
+    runtime->head_marker_hook_id_lit = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }
@@ -1808,8 +1810,8 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
         or_release_handle(dust_type);
     }
 
-    /* HitEffect remains ABI-probed for diagnostics, but is not exposed as a
-     * particle emitter because the target build produced no visible effect. */
+    /* HitEffect has an exact scalar ABI but renders as each NPC's native hurt
+     * effect (blood for zombies). It is diagnostics-only, not a tier visual. */
     {
         static const patch_type_t hit_effect_args[] = {
             PATCH_INT32, PATCH_DOUBLE
@@ -1828,7 +1830,7 @@ static void or_resolve_visual_members(OR_Runtime *runtime,
                 OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
                                "[VISUAL_EFFECT_ABI] method=HitEffect "
                                "instance=yes returnType=void args=int32,double "
-                               "status=verified invoke=disabled reason=not_particle_emitter");
+                               "status=verified invoke=disabled reason=native_hurt_effect_not_tier_visual");
             } else {
                 OR_RUNTIME_LOG(MOD_LOG_LEVEL_INFO,
                                "[VISUAL_EFFECT_ABI] method=HitEffect "
@@ -2606,6 +2608,8 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_uninstall_hook(&runtime->display_name_hook_id);
     or_uninstall_hook(&runtime->display_name_hook_id_alt);
     or_uninstall_hook(&runtime->display_name_hook_id_third);
+    or_uninstall_hook(&runtime->head_marker_hook_id);
+    or_uninstall_hook(&runtime->head_marker_hook_id_lit);
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         or_uninstall_hook(&runtime->mouse_text_hook_ids[i]);
     }
@@ -2718,6 +2722,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     runtime->display_name_hook_id = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id_alt = PATCH_HOOK_INVALID_ID;
     runtime->display_name_hook_id_third = PATCH_HOOK_INVALID_ID;
+    runtime->head_marker_hook_id = PATCH_HOOK_INVALID_ID;
     for (i = 0; i < OR_MOUSE_TEXT_METHOD_LIMIT; ++i) {
         runtime->mouse_text_hook_ids[i] = PATCH_HOOK_INVALID_ID;
     }
