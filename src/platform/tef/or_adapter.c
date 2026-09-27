@@ -53,6 +53,10 @@ extern void *(*patchlib_field_get_pointer)(patch_handle_t field,
 #define OR_TERRARIA_TICKS_PER_DAY 86400u
 #define ORIGINREWRITE_ENABLE_BOSS_DIALOG 1
 #define ORIGINREWRITE_ENABLE_SPECIAL_AI 1
+/* Diagnostic rollback build: isolate world-entry crashes from NPC.AI callbacks.
+ * SetDefaults hooks are automatically removed by the P0 gate below because
+ * the activation callback is intentionally not installed in this build. */
+#define ORIGINREWRITE_DIAGNOSTIC_DISABLE_AI_HOOK 1
 
 #define OR_DIAG_LOG(...) \
     do { \
@@ -4064,11 +4068,17 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
             any_setdefaults = true;
         }
     }
+#if ORIGINREWRITE_DIAGNOSTIC_DISABLE_AI_HOOK
+    OR_LOG(MOD_LOG_LEVEL_WARNING,
+           "[AI_HOOK_ISOLATION] installed=no reason=diagnostic_build "
+           "bossAI=not_executed eliteCommit=disabled");
+#else
     if (runtime->method_ai &&
         or_runtime_signature_matches(runtime->method_ai, true, PATCH_VOID, NULL, 0u)) {
         ai_hook_ok = install_postfix(runtime->method_ai, ai_postfix,
                                      &runtime->ai_hook_id);
     }
+#endif
     if (or_head_marker_probe(runtime)) {
         patch_handle_t draw_method = or_head_marker_frame_method();
         if (draw_method && runtime->head_marker_hook_id == PATCH_HOOK_INVALID_ID &&
@@ -4119,8 +4129,8 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
                "[P0_GATE] AI postfix unavailable; SetDefaults capture disabled");
     }
     OR_LOG(MOD_LOG_LEVEL_WARNING,
-           "[SAFE_MODE] colorMarker=%s extra-loot=enabled special-AI=enabled; "
-           "origin residue=low-density NewDust; name marker active; NewText calamity+",
+           "[SAFE_MODE] colorMarker=%s extra-loot=observer-only "
+           "special-AI=disabled-by-hook-isolation; eliteCommit=off",
            "safe-off");
     runtime->capabilities.exact_spawn_commit_resolved = any_setdefaults && ai_hook_ok;
     runtime->capabilities.exact_death_hook_resolved = false;
@@ -4132,8 +4142,10 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
     runtime->capabilities.gameplay_enabled = any_setdefaults && ai_hook_ok;
     g_adapter.installed = runtime->capabilities.gameplay_enabled;
     OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[BOSS_AI_GATE] enabled=%s positionField=%s velocityField=%s authority=single-player",
+           "[BOSS_AI_GATE] configured=%s effective=%s positionField=%s "
+           "velocityField=%s authority=single-player",
            g_adapter.config && g_adapter.config->enable_boss_ai ? "yes" : "no",
+           ai_hook_ok && g_adapter.config && g_adapter.config->enable_boss_ai ? "yes" : "no",
            runtime->field_position_probe ? "available" : "off",
            runtime->field_velocity_probe ? "available" : "off");
     OR_DIAG_LOG("adapter_hooks setdefaults=%u ai=%s lootObserver=%s gameplay=%s safe_mode=on",

@@ -1,4 +1,12 @@
-# OriginRewrite v1.2.4 重构边界与验收记录
+# OriginRewrite v1.2.5 隔离诊断记录
+
+## v1.2.5 NPC.AI Hook 隔离
+
+- 运行日志显示 NPC.AI Hook 在首次 AI 回调中进入世界上下文读取后进程收到 SIGABRT。该证据尚不能区分通用 AI Hook、世界上下文读取或 Boss 状态逻辑。
+- 诊断构建跳过 NPC.AI Hook 安装；保留 SetDefaults 捕获尝试，但由于精英唯一提交点依赖 AI 回调，P0 gate 会卸载 SetDefaults Hook 并关闭精英提交。
+- Boss AI 阶段、普通精英提交以及依赖 AI 回调的运行功能在该构建中均不可用。启动日志必须包含 [AI_HOOK_ISOLATION] installed=no 与 [HOOK_STATE] version=1.2.5 gameplay=off。
+- 若仍然闪退，说明关闭 AI Hook 后问题仍存在；若可以进地图，下一版本再单独恢复通用 AI Hook、继续保持 Boss 状态机关闭，以区分 Hook ABI/回调与 Boss 专用逻辑。
+- 该构建用于一次进图隔离测试，不用于正常游玩；目标游戏 1.4.5.8.6 仍高于当前已声明的最高兼容版本 1.4.5.8.5。
 
 ## 本次改动
 
