@@ -9,13 +9,6 @@
 extern "C" {
 #endif
 
-/* Terraria advances 60 ticks per second.  A Boss card is three lines and is
- * kept exclusive for two seconds so ordinary world/elite notices cannot
- * cover it while it is being read. */
-#define OR_BOSS_DIALOG_LOCK_TICKS 120u
-/* Temporary test cadence for the daily world-status card: 60 ticks = 1 s. */
-#define OR_DAILY_BROADCAST_INTERVAL_TICKS 1800u
-
 typedef struct OR_BroadcastState {
     uint32_t next_message_id;
     uint32_t last_message_id;
@@ -28,7 +21,6 @@ typedef struct OR_BroadcastState {
     uint32_t last_world_key;
     uint64_t last_world_tick;
     uint64_t last_rule_summary_key;
-    uint64_t last_daily_broadcast_wall_second;
     /* Narrative counters are intentionally independent from loot and from
      * transient chat de-duplication.  They survive a local-player respawn. */
     uint32_t boss_summon_count[1024];
@@ -39,6 +31,7 @@ typedef struct OR_BroadcastState {
 
 void or_broadcast_init(OR_BroadcastState *state);
 void or_broadcast_on_player_respawn(OR_BroadcastState *state);
+void or_broadcast_hold_for_boss(OR_BroadcastState *state, uint64_t now_tick);
 bool or_broadcast_emit_elite(OR_BroadcastState *state,
                              const OR_Runtime *runtime,
                              OR_EliteTier tier,
@@ -62,11 +55,6 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
                                     const OR_RuleSnapshot *snapshot,
                                     uint64_t rule_revision,
                                     uint64_t now_tick);
-bool or_broadcast_emit_daily(OR_BroadcastState *state,
-                             const OR_Runtime *runtime,
-                             const OR_RuleSnapshot *snapshot,
-                             uint64_t rule_revision,
-                             uint64_t now_tick);
 bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *runtime,
                                    uint32_t npc_type, OR_BossDialogEvent event,
                                    uint64_t now_tick);

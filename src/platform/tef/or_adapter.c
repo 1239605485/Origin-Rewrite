@@ -2,6 +2,7 @@
 
 #include "or_log.h"
 #include "or_ai.h"
+#include "or_boss_ai.h"
 #include "or_loot.h"
 #include "or_spawn.h"
 #include "or_broadcast.h"
@@ -11,6 +12,7 @@
 #include "or_player_rule_adapter.h"
 #include "or_visual_effects.h"
 #include "or_head_marker.h"
+#include "or_visual_policy.h"
 
 #include "tefkernel/patchlib/field.h"
 #include "tefkernel/patchlib/method.h"
@@ -83,6 +85,7 @@ typedef struct OR_NativeBinding {
     bool pending_is_town;
     bool pending_is_friendly;
     OR_AiRuntimeState ai_runtime;
+    OR_BossAiState boss_ai;
     uint64_t ai_ticks;
     uint64_t last_seen_tick;
     uint64_t death_observed_tick;
@@ -141,7 +144,6 @@ typedef struct OR_Adapter {
     OR_WorldRuleState world_rules;
     uint64_t world_rules_session;
     uint64_t world_rule_revision;
-    uint64_t last_daily_broadcast_wall_second;
     uint64_t world_clock_session;
     uint64_t world_clock_start_tick;
     uint64_t game_day_counter;
@@ -301,6 +303,9 @@ static void observe_player_rules(patch_handle_t instance) {
         }
         if (player_identity && player_identity != g_adapter.last_player_identity) {
             uint32_t boss_type;
+            /* Reset ordinary notice deduplication first; the defeat line is
+             * emitted afterward so its priority lock survives respawn. */
+            or_broadcast_on_player_respawn(&g_adapter.broadcast);
             /* On this Android build LocalPlayer receives a new managed
              * identity after respawn. While a boss is still active, use that
              * verified lifecycle edge as the player-death notification. */
@@ -317,13 +322,7 @@ static void observe_player_rules(patch_handle_t instance) {
             g_adapter.terrain_broadcast_pending = false;
             g_adapter.world_broadcast_step = 0u;
             g_adapter.rule_summary_emitted = false;
-            g_adapter.last_daily_broadcast_wall_second = 0u;
             or_player_rule_adapter_init(&g_adapter.player_rules);
-            /* Broadcast deduplication is session-scoped. A returning player
-             * must receive current-world notices again even when keys match.
-             * World rules themselves belong to the world session, not to the
-             * managed-player object, so they intentionally remain in memory. */
-            or_broadcast_on_player_respawn(&g_adapter.broadcast);
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[PLAYER_RESPAWN] reset=bootstrap preserve=world_rule_memory session=%llu",
                    (unsigned long long)world_session_id());
@@ -394,15 +393,6 @@ static void observe_player_rules(patch_handle_t instance) {
                        "[PLAYER_RULE_SEQUENCE] step=2 card=world_rules complete=yes");
                 return;
             }
-        }
-        if (g_adapter.world_broadcast_step >= 2u &&
-            g_adapter.world_rules.initialized &&
-            ((uint64_t)time(NULL) >= g_adapter.last_daily_broadcast_wall_second +
-             (OR_DAILY_BROADCAST_INTERVAL_TICKS / 60u))) {
-            bool daily = or_broadcast_emit_daily(
-                &g_adapter.broadcast, g_adapter.runtime,
-                &g_adapter.world_rules.snapshot, g_adapter.world_rule_revision, tick);
-            if (daily) g_adapter.last_daily_broadcast_wall_second = (uint64_t)time(NULL);
         }
         if (world || summary || terrain_changed) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
@@ -1654,10 +1644,8 @@ static void ensure_world_rules(OR_ProgressStage progress,
             world_rules_save(fingerprint, &g_adapter.world_rules);
         }
         g_adapter.world_rules_session = session;
-        g_adapter.broadcast.last_daily_broadcast_wall_second = 0u;
         g_adapter.world_rule_revision = 1u;
         g_adapter.rule_summary_emitted = false;
-        g_adapter.last_daily_broadcast_wall_second = 0u;
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[WORLD_RULES] session=%llu status=%d selected=%u revision=1 "
                "gameDay=%llu source=%s memory=active",
@@ -1681,8 +1669,6 @@ static void ensure_world_rules(OR_ProgressStage progress,
             g_adapter.world_rules.refresh_count + 1u > old_revision) {
             g_adapter.world_rule_revision = g_adapter.world_rules.refresh_count + 1u;
             g_adapter.rule_summary_emitted = false;
-            g_adapter.last_daily_broadcast_wall_second = 0u;
-            g_adapter.broadcast.last_daily_broadcast_wall_second = 0u;
             world_rules_save(fingerprint, &g_adapter.world_rules);
             OR_LOG(MOD_LOG_LEVEL_INFO,
                    "[WORLD_RULES_REFRESH] session=%llu gameDay=%llu revision=%llu "
@@ -3375,6 +3361,69 @@ static void apply_special_ai(patch_handle_t instance, OR_NativeBinding *binding,
     }
 }
 
+static void update_boss_ai(patch_handle_t instance,
+                           OR_NativeBinding *binding,
+                           uint32_t npc_type,
+                           const OR_VanillaStats *vanilla) {
+    OR_BossAiInput input;
+    OR_BossAiOutput output;
+    float position[2];
+    float velocity[2];
+    float ratio;
+    bool single_player = false;
+    bool authority_known = false;
+    static uint32_t phase_log_samples;
+
+    if (!instance || !binding || !vanilla || !g_adapter.config ||
+        !g_adapter.config->enable_boss_ai || binding->elite ||
+        !or_boss_ai_type_supported(npc_type) || !g_adapter.last_player_position_valid ||
+        g_adapter.player_dead_cached ||
+        !host_authority(&single_player, &authority_known) ||
+        !authority_known || !single_player ||
+        !g_adapter.runtime || !g_adapter.runtime->field_position_probe ||
+        !g_adapter.runtime->field_velocity_probe) return;
+    if (!read_vector2_field(g_adapter.runtime->field_position_probe, instance, position) ||
+        !read_vector2_field(g_adapter.runtime->field_velocity_probe, instance, velocity)) return;
+
+    ratio = vanilla->life_max > 0
+        ? (float)vanilla->life_current / (float)vanilla->life_max : 0.0f;
+    if (!isfinite(ratio)) return;
+    if (ratio < 0.0f) ratio = 0.0f;
+    if (ratio > 1.0f) ratio = 1.0f;
+    input.npc_type = npc_type;
+    input.npc_x = position[0];
+    input.npc_y = position[1];
+    input.player_x = g_adapter.last_player_position[0];
+    input.player_y = g_adapter.last_player_position[1];
+    input.life_ratio = ratio;
+    if (!or_boss_ai_step(&binding->boss_ai, &input, &output)) return;
+
+    if (output.velocity_delta_x != 0.0f || output.velocity_delta_y != 0.0f) {
+        velocity[0] += output.velocity_delta_x;
+        velocity[1] += output.velocity_delta_y;
+        if (isfinite(velocity[0]) && isfinite(velocity[1])) {
+            (void)write_vector2_field(g_adapter.runtime->field_velocity_probe,
+                                      instance, velocity);
+        }
+    }
+    if (output.phase_changed && phase_log_samples < 128u) {
+        const char *phase_name = "idle";
+        ++phase_log_samples;
+        switch (output.phase) {
+            case OR_BOSS_AI_TELEGRAPH: phase_name = "telegraph"; break;
+            case OR_BOSS_AI_PRESSURE: phase_name = "pressure"; break;
+            case OR_BOSS_AI_RECOVERY: phase_name = "recovery"; break;
+            case OR_BOSS_AI_COOLDOWN: phase_name = "cooldown"; break;
+            case OR_BOSS_AI_IDLE:
+            default: break;
+        }
+        OR_LOG(MOD_LOG_LEVEL_INFO,
+               "[BOSS_AI_PHASE] type=%u phase=%s tick=%u impulse=bounded-native-overlay",
+               (unsigned)npc_type, phase_name,
+               (unsigned)binding->boss_ai.tick);
+    }
+}
+
 static void ai_postfix(
     patch_handle_t instance, void **args, void *result,
     const patch_method_signature_t *sig_info) {
@@ -3412,29 +3461,40 @@ static void ai_postfix(
     observe_player_rules(instance);
     if (ORIGINREWRITE_ENABLE_BOSS_DIALOG && active && is_boss && vanilla.life_max > 0) {
         OR_BossDialogEvent boss_event;
-        uint64_t dialog_tick;
         float boss_ratio = (float)vanilla.life_current / (float)vanilla.life_max;
         uint32_t dialog_key = boss_dialog_key(npc_type);
+        if (!g_adapter.boss_active_by_type[dialog_key]) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[BOSS_PRIORITY_LOCK] type=%u state=encounter_active policy=hold_other_mod_broadcasts",
+                   (unsigned)npc_type);
+        }
         g_adapter.boss_active_by_type[dialog_key] = true;
         if (dialog_key < 1024u &&
             or_boss_dialog_adapter_observe(&g_adapter.boss_dialog_by_type[dialog_key], boss_ratio, &boss_event)) {
-            dialog_tick = update_tick();
             bool shown = or_broadcast_emit_boss_dialog(&g_adapter.broadcast,
-                g_adapter.runtime, dialog_key, boss_event, dialog_tick);
-            if (!shown && boss_event != OR_BOSS_DIALOG_DEATH &&
-                dialog_tick < g_adapter.broadcast.boss_lock_until_tick) {
-                /* The threshold was observed, but the broadcast channel may
-                 * still be locked by the arrival card. Retry on a later AI
-                 * tick instead of silently consuming the half-health line. */
-                or_boss_dialog_adapter_requeue(
-                    &g_adapter.boss_dialog_by_type[dialog_key], boss_event);
-            }
+                g_adapter.runtime, dialog_key, boss_event, update_tick());
             OR_LOG(MOD_LOG_LEVEL_INFO, "[BOSS_DIALOG_EVENT] type=%u event=%s shown=%s readOnly=yes",
                    (unsigned)npc_type,
                    boss_event == OR_BOSS_DIALOG_HALF ? "half" :
                        (boss_event == OR_BOSS_DIALOG_DEATH ? "death" : "spawn"),
                    shown ? "yes" : "no");
         }
+    }
+    if (active && is_boss) {
+        /* Keep the priority window alive throughout the encounter, rather
+         * than allowing environment cards to overwrite the boss messages
+         * shortly after the initial two-second lock. */
+        or_broadcast_hold_for_boss(&g_adapter.broadcast, update_tick());
+    }
+    /* Bosses opt out of the elite transaction unless enableBosses is set.
+     * Mark that normal path resolved so the shared observer does not retry
+     * (and clear) the binding every frame; the Boss AI state stays isolated. */
+    if (active && is_boss && !g_adapter.config->eligibility.allow_bosses) {
+        binding->pending = false;
+        binding->roll_resolved = true;
+    }
+    if (active && is_boss && !binding->elite) {
+        update_boss_ai(instance, binding, npc_type, &vanilla);
     }
     /* Death is normally finalized by the loot observer. If vanilla does not
      * reach that boundary, release the binding after a short grace period so
@@ -3667,7 +3727,16 @@ static void head_marker_frame_postfix(patch_handle_t instance, void **args,
     for (i = 0; i < OR_MAX_TRACKED_NPCS; ++i) {
         OR_NativeBinding *binding = &g_adapter.bindings[i];
         const OR_EliteRecord *record;
+        bool npc_active = false;
+        int32_t npc_life = 0;
         if (!binding->occupied || !binding->elite || !binding->instance) continue;
+        /* The renderer can run after death begins but before stale binding
+         * cleanup. Never draw a frame for a dead/inactive NPC. */
+        if (binding->death_started ||
+            !read_bool(g_adapter.runtime->field_active, binding->instance, &npc_active) ||
+            !read_i32(g_adapter.runtime->field_life, binding->instance, &npc_life) ||
+            !or_visual_effect_should_draw(npc_active, npc_life,
+                                          binding->death_started)) continue;
         record = or_state_find_const(g_adapter.state, binding->key);
         if (!record || record->tier <= OR_TIER_NONE || record->tier >= OR_TIER_COUNT) continue;
         or_head_marker_draw(g_adapter.runtime, binding->instance, record->tier, screen_pos);
@@ -4021,6 +4090,11 @@ bool or_adapter_start(OR_Runtime *runtime, OR_Config *config, OR_StateStore *sta
         runtime->loot_observer_hook_id != PATCH_HOOK_INVALID_ID;
     runtime->capabilities.gameplay_enabled = any_setdefaults && ai_hook_ok;
     g_adapter.installed = runtime->capabilities.gameplay_enabled;
+    OR_LOG(MOD_LOG_LEVEL_INFO,
+           "[BOSS_AI_GATE] enabled=%s positionField=%s velocityField=%s authority=single-player",
+           g_adapter.config && g_adapter.config->enable_boss_ai ? "yes" : "no",
+           runtime->field_position_probe ? "available" : "off",
+           runtime->field_velocity_probe ? "available" : "off");
     OR_DIAG_LOG("adapter_hooks setdefaults=%u ai=%s lootObserver=%s gameplay=%s safe_mode=on",
                 (unsigned)runtime->setdefaults_hook_count,
                 runtime->ai_hook_id != PATCH_HOOK_INVALID_ID ? "on" : "off",

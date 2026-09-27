@@ -6,6 +6,7 @@
   "worldRuleChangeEveryDays": 3,
   "terrainNoticeCooldownTicks": 36000,
   "enableGameplayHooks": true,
+  "enableBossAI": true,
   "enableNativeExtraLoot": true,
   "allowVanillaCrates": true,
   "alteredExtraRewardChance": 0.20,
@@ -24,6 +25,7 @@
   "runtimeAppliedKeys": [
     "enableElites",
     "enableGameplayHooks",
+    "enableBossAI",
     "enableNativeExtraLoot",
     "maxActiveRewrites",
     "sameNpcCooldownTicks",

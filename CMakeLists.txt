@@ -19,6 +19,8 @@ endif()
 
 set(ORIGINREWRITE_CORE_SOURCES
     src/core/or_ai.c
+    src/core/or_boss_ai.c
+    src/core/or_broadcast_priority.c
     src/core/or_config.c
     src/core/or_compat.c
     src/core/or_item_registry.c
@@ -29,6 +31,7 @@ set(ORIGINREWRITE_CORE_SOURCES
     src/core/or_state.c
     src/core/or_stats.c
     src/core/or_world.c
+    src/core/or_visual_policy.c
     src/core/or_player_rule_adapter.c
     src/core/or_boss_dialog_adapter.c
 )
@@ -60,7 +63,7 @@ target_include_directories(OriginRewrite
 target_compile_definitions(OriginRewrite PRIVATE
     ORIGINREWRITE_BUILDING=1
     BUILDING_DLL=1
-    ORIGINREWRITE_VERSION="1.1.0"
+    ORIGINREWRITE_VERSION="1.2.1"
 )
 
 if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -137,4 +140,34 @@ endif()
 if (ORIGINREWRITE_BUILD_TESTS AND NOT EXISTS
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/core_test.c")
     message(STATUS "OriginRewrite core tests are not included in this source archive")
+endif()
+
+if (ORIGINREWRITE_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
+    enable_testing()
+    add_executable(originrewrite_boss_ai_test
+        tests/boss_ai_test.c
+        src/core/or_boss_ai.c)
+    target_include_directories(originrewrite_boss_ai_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    if (UNIX AND NOT APPLE)
+        target_link_libraries(originrewrite_boss_ai_test PRIVATE m)
+    endif()
+    add_test(NAME originrewrite_boss_ai_test COMMAND originrewrite_boss_ai_test)
+
+    add_executable(originrewrite_broadcast_priority_test
+        tests/broadcast_priority_test.c
+        src/core/or_broadcast_priority.c)
+    target_include_directories(originrewrite_broadcast_priority_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                "${ORIGINREWRITE_MOD_API_DIR}")
+    add_test(NAME originrewrite_broadcast_priority_test
+        COMMAND originrewrite_broadcast_priority_test)
+
+    add_executable(originrewrite_visual_policy_test
+        tests/visual_policy_test.c
+        src/core/or_visual_policy.c)
+    target_include_directories(originrewrite_visual_policy_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    add_test(NAME originrewrite_visual_policy_test
+        COMMAND originrewrite_visual_policy_test)
 endif()

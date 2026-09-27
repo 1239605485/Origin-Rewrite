@@ -2,6 +2,7 @@
 
 #include "or_config.h"
 #include "or_log.h"
+#include "or_visual_policy.h"
 
 #include "tefkernel/patchlib/field.h"
 #include "tefkernel/patchlib/method.h"
@@ -32,6 +33,7 @@ typedef struct OR_HeadMarkerState {
     patch_handle_t screen_position_method;
     patch_handle_t player_dead_field;
     patch_handle_t entity_sprite_draw_method;
+    patch_handle_t lighting_get_color_method;
     void (*entity_sprite_draw)(patch_handle_t texture,
                                struct OR_MarkerVector2 position,
                                struct OR_MarkerRectangle source_rect,
@@ -42,6 +44,7 @@ typedef struct OR_HeadMarkerState {
                                int32_t effects,
                                float layer_depth);
     struct OR_MarkerVector2 (*get_screen_position)(void);
+    struct OR_MarkerColor (*get_lighting_color)(int32_t tile_x, int32_t tile_y);
     patch_handle_t texture;
     bool ready;
     uint8_t create_attempts;
@@ -94,12 +97,14 @@ bool or_head_marker_probe(const OR_Runtime *runtime) {
     patch_handle_t vector2_type;
     patch_handle_t rectangle_type;
     patch_handle_t color_type;
+    patch_handle_t lighting_type;
     patch_handle_t sprite_effects_type;
     patch_handle_t bool_type;
     patch_handle_t float_type;
     patch_handle_t draw_npc_args[4];
     patch_handle_t draw_npc_lit_args[6];
     patch_handle_t entity_draw_args[9];
+    patch_handle_t lighting_get_color_args[2];
     patch_handle_t light_map_type;
 
     memset(&g_marker, 0, sizeof(g_marker));
@@ -124,13 +129,15 @@ bool or_head_marker_probe(const OR_Runtime *runtime) {
     vector2_type = patchlib_type_get_type("Microsoft.Xna.Framework", "Vector2");
     rectangle_type = patchlib_type_get_type("Microsoft.Xna.Framework", "Rectangle");
     color_type = patchlib_type_get_type("Microsoft.Xna.Framework.Graphics", "Color");
+    lighting_type = patchlib_type_get_type("Terraria", "Lighting");
     sprite_effects_type = patchlib_type_get_type("Microsoft.Xna.Framework.Graphics", "SpriteEffects");
     light_map_type = patchlib_type_get_type("Terraria", "Lighting+LightMap");
     if (!light_map_type) light_map_type = patchlib_type_get_type("Terraria", "LightMap");
     bool_type = patchlib_get_basic_type(PATCH_BOOL);
     float_type = patchlib_get_basic_type(PATCH_FLOAT);
     if (!main_type || !sprite_batch_type || !npc_type || !texture_type || !vector2_type ||
-        !rectangle_type || !color_type || !sprite_effects_type || !bool_type || !float_type) {
+        !rectangle_type || !color_type || !lighting_type || !sprite_effects_type ||
+        !bool_type || !float_type) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[FOOT_FX_PROBE] ready=no reason=required_type_unavailable");
         return false;
@@ -149,6 +156,8 @@ bool or_head_marker_probe(const OR_Runtime *runtime) {
     entity_draw_args[6] = float_type;
     entity_draw_args[7] = sprite_effects_type;
     entity_draw_args[8] = float_type;
+    lighting_get_color_args[0] = patchlib_get_basic_type(PATCH_INT32);
+    lighting_get_color_args[1] = patchlib_get_basic_type(PATCH_INT32);
     draw_npc_lit_args[0] = sprite_batch_type;
     draw_npc_lit_args[1] = npc_type;
     draw_npc_lit_args[2] = bool_type;
@@ -178,6 +187,12 @@ bool or_head_marker_probe(const OR_Runtime *runtime) {
     }
     g_marker.entity_sprite_draw_method = patchlib_type_get_method_by_param_types(
         main_type, "EntitySpriteDraw", 9, entity_draw_args);
+    g_marker.lighting_get_color_method = patchlib_type_get_method_by_param_types(
+        lighting_type, "GetColor", 2, lighting_get_color_args);
+    if (g_marker.lighting_get_color_method) {
+        g_marker.get_lighting_color = (struct OR_MarkerColor (*)(int32_t, int32_t))
+            patchlib_method_get_pointer(g_marker.lighting_get_color_method);
+    }
     if (g_marker.entity_sprite_draw_method) {
         g_marker.entity_sprite_draw = (void (*)(patch_handle_t,
                                                   struct OR_MarkerVector2,
@@ -192,10 +207,12 @@ bool or_head_marker_probe(const OR_Runtime *runtime) {
     }
     g_marker.ready = g_marker.frame_method && g_marker.entity_sprite_draw_method &&
                      g_marker.entity_sprite_draw && g_marker.get_screen_position &&
-                     g_marker.player_dead_field;
+                     g_marker.player_dead_field && g_marker.lighting_get_color_method &&
+                     g_marker.get_lighting_color;
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[FOOT_FX_PROBE] ready=%s frame=Main.DrawNPCs(1):%s hook4=%s hook6=%s "
-           "screenPositionGetter=%s playerDeadField=%s draw=Main.EntitySpriteDraw(9) "
+           "screenPositionGetter=%s playerDeadField=%s lighting=%s "
+           "draw=Main.EntitySpriteDraw(9) "
            "textureApi=%s drawCall=direct_method_pointer",
            g_marker.ready ? "yes" : "no",
            g_marker.frame_method ? "yes" : "no",
@@ -203,6 +220,7 @@ bool or_head_marker_probe(const OR_Runtime *runtime) {
            g_marker.draw_npc_method_lit ? "yes" : "no",
            g_marker.get_screen_position ? "yes" : "no",
            g_marker.player_dead_field ? "yes" : "no",
+           g_marker.get_lighting_color ? "ready" : "off",
            terraria_texture2d_create ? "yes" : "no");
     return g_marker.ready;
 #endif
@@ -262,6 +280,11 @@ void or_head_marker_draw(const OR_Runtime *runtime,
         OR_FX_TILE_SIZE, OR_FX_TILE_SIZE
     };
     struct OR_MarkerColor color;
+    struct OR_MarkerColor light_color;
+    uint8_t tint_rgb[3];
+    uint8_t tint_alpha = 0u;
+    int32_t light_tile_x;
+    int32_t light_tile_y;
     float rotation = 0.0f;
     struct OR_MarkerVector2 origin = {64.0f, 116.0f};
     /* Keep the aura compact and place its lowest pixels just below the feet. */
@@ -273,6 +296,7 @@ void or_head_marker_draw(const OR_Runtime *runtime,
         tier <= OR_TIER_NONE || tier >= OR_TIER_COUNT ||
         !runtime->field_position_probe || !runtime->field_width ||
         !runtime->field_height || !patchlib_field_get_value ||
+        !g_marker.get_lighting_color ||
         !g_marker.entity_sprite_draw || !ensure_texture()) return;
 
     patchlib_field_get_value(runtime->field_position_probe, npc, position_raw);
@@ -285,17 +309,32 @@ void or_head_marker_draw(const OR_Runtime *runtime,
 
     draw_position.x = position[0] + (float)width * 0.5f - screen_pos[0];
     draw_position.y = position[1] + (float)height + 8.0f - screen_pos[1];
-    /* Preserve the colours and soft glows from the supplied artwork. */
-    color.a = 255u; color.b = 255u; color.g = 255u; color.r = 255u;
+    light_tile_x = (int32_t)((position[0] + (float)width * 0.5f) / 16.0f);
+    light_tile_y = (int32_t)((position[1] + (float)height * 0.75f) / 16.0f);
+    light_color = g_marker.get_lighting_color(light_tile_x, light_tile_y);
+    /* Modulate the atlas by the same tile light used for world sprites.
+     * Dark tiles reduce RGB and alpha, preventing a full-bright glyph. */
+    {
+        const uint8_t light_rgb[3] = {light_color.r, light_color.g, light_color.b};
+        or_visual_effect_light_tint(tint_rgb, &tint_alpha, light_rgb);
+    }
+    color.r = tint_rgb[0];
+    color.g = tint_rgb[1];
+    color.b = tint_rgb[2];
+    color.a = tint_alpha;
     g_marker.entity_sprite_draw(g_marker.texture, draw_position, source_rect,
                                 color, rotation, origin, scale, effects,
                                 layer_depth);
     if (g_marker.draw_logs < 12u) {
         ++g_marker.draw_logs;
         OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[FOOT_FX_DRAW] result=drawn tier=%s x=%.1f y=%.1f scale=%.2f",
+               "[FOOT_FX_DRAW] result=drawn tier=%s x=%.1f y=%.1f scale=%.2f "
+               "tile=%d,%d light=%u,%u,%u,%u",
                or_elite_tier_name(tier), (double)draw_position.x,
-               (double)draw_position.y, (double)scale);
+               (double)draw_position.y, (double)scale,
+               (int)light_tile_x, (int)light_tile_y,
+               (unsigned)light_color.r, (unsigned)light_color.g,
+               (unsigned)light_color.b, (unsigned)color.a);
     }
 #endif
 }

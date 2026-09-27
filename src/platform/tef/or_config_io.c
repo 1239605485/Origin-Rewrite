@@ -97,6 +97,7 @@ bool or_config_io_apply_json(const char *json,
     (void)read_bool_key(json, "enableElites", &config->enable_elites, report);
     (void)read_bool_key(json, "enableGameplayHooks",
                         &config->enable_gameplay_hooks, report);
+    (void)read_bool_key(json, "enableBossAI", &config->enable_boss_ai, report);
     (void)read_bool_key(json, "enableBosses",
                         &config->eligibility.allow_bosses, report);
     (void)read_bool_key(json, "allowPreHardmodeApocalypse",

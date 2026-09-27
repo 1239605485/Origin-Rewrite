@@ -8,7 +8,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #define OR_LOG(level, ...) do { or_log_write((level), __VA_ARGS__); } while (0)
 
@@ -264,14 +263,11 @@ void or_broadcast_on_player_respawn(OR_BroadcastState *state) {
     /* A respawn is not a new world: keep Boss narrative memory, but allow
      * bootstrap notices and the next private defeat event to be displayed. */
     state->last_emit_tick = 0u;
-    /* Do not clear the Boss lock here.  Player identity is recreated during
-     * respawn, but the defeat dialogue was just emitted on the previous tick
-     * and must remain exclusive for its full display window. */
+    state->boss_lock_until_tick = 0u;
     state->last_terrain_key = 0u;
     state->last_terrain_tick = 0u;
     state->last_world_key = 0u;
     state->last_world_tick = 0u;
-    state->last_daily_broadcast_wall_second = 0u;
     /* The world-state card and the rule-summary card form one entry
      * sequence.  Re-entry creates a new LocalPlayer object on this Android
      * build, so retaining the old summary key would let card 1 through but
@@ -408,12 +404,7 @@ bool or_broadcast_emit_elite(OR_BroadcastState *state,
     bool card_ok;
 
     if (!state || !runtime || tier < OR_TIER_ALTERED || tier > OR_TIER_APOCALYPSE) return false;
-    if (now_tick < state->boss_lock_until_tick) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[BOSS_DIALOG_LOCK] channel=elite action=blocked remaining=%llu",
-               (unsigned long long)(state->boss_lock_until_tick - now_tick));
-        return false;
-    }
+    if (now_tick < state->boss_lock_until_tick) return false;
     message_id = next_message_id(state);
     prefix = tier_prefix(tier);
     tier_rgba(tier, rgba);
@@ -500,13 +491,8 @@ bool or_broadcast_emit_terrain(OR_BroadcastState *state,
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[TERRAIN_BROADCAST_SKIP] reason=api_or_snapshot_unavailable");
         return false;
-    if (now_tick < state->boss_lock_until_tick) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[BOSS_DIALOG_LOCK] channel=terrain action=blocked remaining=%llu",
-               (unsigned long long)(state->boss_lock_until_tick - now_tick));
-        return false;
     }
-    }
+    if (now_tick < state->boss_lock_until_tick) return false;
     if (state->last_terrain_key == key && state->last_terrain_tick != 0u) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[TERRAIN_BROADCAST_SKIP] reason=duplicate key=%u", (unsigned)key);
@@ -553,12 +539,7 @@ bool or_broadcast_emit_world(OR_BroadcastState *state,
     uint32_t key = ((uint32_t)weather << 1) | (is_night ? 1u : 0u);
     const char *weather_name;
     bool card_ok;
-    if (state && now_tick < state->boss_lock_until_tick) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[BOSS_DIALOG_LOCK] channel=world action=blocked remaining=%llu",
-               (unsigned long long)(state->boss_lock_until_tick - now_tick));
-        return false;
-    }
+    if (state && now_tick < state->boss_lock_until_tick) return false;
     if (!state || !runtime || !runtime->capabilities.new_text_ready ||
         !runtime->method_main_new_text || !patchlib_string_create ||
         !patchlib_method_invoke_args || weather >= OR_WEATHER_COUNT) {
@@ -607,12 +588,7 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
     uint8_t rgba[4] = {255u, 224u, 138u, 255u}; /* world rules: pale gold */
     size_t i;
     bool card_ok;
-    if (state && now_tick < state->boss_lock_until_tick) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[BOSS_DIALOG_LOCK] channel=world_rule action=blocked remaining=%llu",
-               (unsigned long long)(state->boss_lock_until_tick - now_tick));
-        return false;
-    }
+    if (state && now_tick < state->boss_lock_until_tick) return false;
     if (!state || !runtime || !snapshot || !snapshot->selected_count ||
         !runtime->capabilities.new_text_ready || !runtime->method_main_new_text ||
         !patchlib_string_create || !patchlib_method_invoke_args) return false;
@@ -647,58 +623,6 @@ bool or_broadcast_emit_rule_summary(OR_BroadcastState *state,
     return true;
 }
 
-bool or_broadcast_emit_daily(OR_BroadcastState *state,
-                             const OR_Runtime *runtime,
-                             const OR_RuleSnapshot *snapshot,
-                             uint64_t rule_revision,
-                             uint64_t now_tick) {
-    char message[256];
-    uint8_t rgba[4] = {255u, 224u, 138u, 255u};
-    size_t i;
-    bool card_ok;
-    uint64_t wall_second;
-    if (!state || !runtime || !snapshot || snapshot->selected_count < 2u ||
-        snapshot->selected_count > OR_MAX_WORLD_RULES ||
-        !runtime->capabilities.new_text_ready || !runtime->method_main_new_text ||
-        !patchlib_string_create || !patchlib_method_invoke_args) return false;
-    (void)now_tick;
-    wall_second = (uint64_t)time(NULL);
-    if (state->last_daily_broadcast_wall_second != 0u &&
-        wall_second < state->last_daily_broadcast_wall_second +
-                          (OR_DAILY_BROADCAST_INTERVAL_TICKS / 60u)) {
-        return false;
-    }
-    if (now_tick < state->boss_lock_until_tick) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[DAILY_BROADCAST] action=deferred reason=boss_dialog_lock remaining=%llu",
-               (unsigned long long)(state->boss_lock_until_tick - now_tick));
-        return false;
-    }
-    card_ok = emit_card_line(runtime, "world_rule",
-                             "╭─ 起源律动 · 每日播报 ─╮", rgba, true);
-    (void)snprintf(message, sizeof(message), "│ 当前世界规则：%u 条（第 %llu 轮）",
-                   (unsigned)snapshot->selected_count,
-                   (unsigned long long)rule_revision);
-    card_ok = emit_card_line(runtime, "world_rule", message, rgba, false) && card_ok;
-    for (i = 0u; i < snapshot->selected_count && i < OR_MAX_WORLD_RULES; ++i) {
-        (void)snprintf(message, sizeof(message), "│ %s：%s",
-                       world_rule_name_zh(snapshot->selected_ids[i]),
-                       world_rule_effect_zh(snapshot->selected_ids[i]));
-        card_ok = emit_card_line(runtime, "world_rule", message, rgba, false) && card_ok;
-    }
-    card_ok = emit_card_line(runtime, "world_rule",
-                             "╰─ 起源律动 · 今日规则有效 ─╯", rgba, true) && card_ok;
-    if (!card_ok) return false;
-    state->last_daily_broadcast_wall_second = wall_second;
-    OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[DAILY_BROADCAST] shown=yes intervalTicks=%u intervalSeconds=%u revision=%llu rules=%u",
-           (unsigned)OR_DAILY_BROADCAST_INTERVAL_TICKS,
-           (unsigned)(OR_DAILY_BROADCAST_INTERVAL_TICKS / 60u),
-           (unsigned long long)rule_revision,
-           (unsigned)snapshot->selected_count);
-    return true;
-}
-
 bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *runtime,
                                    uint32_t npc_type, OR_BossDialogEvent event, uint64_t now_tick) {
     char message[256];
@@ -711,16 +635,9 @@ bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *r
     if (!state || !runtime || !runtime->capabilities.new_text_ready ||
         (runtime->main_new_text_arg_count != 1 && runtime->main_new_text_arg_count != 3 &&
          runtime->main_new_text_arg_count != 4) || !patchlib_string_create || !patchlib_method_invoke_args) return false;
+    /* Boss dialogue is the priority channel. Ordinary broadcasts are held
+     * while a boss remains active; phase/death lines must still be allowed. */
     if (event != OR_BOSS_DIALOG_SPAWN && event != OR_BOSS_DIALOG_HALF && event != OR_BOSS_DIALOG_DEATH) return false;
-    /* Spawn/half events wait for the previous card.  Death is terminal and is
-     * allowed to take priority so a fast kill cannot lose its conclusion. */
-    if (event != OR_BOSS_DIALOG_DEATH && now_tick < state->boss_lock_until_tick) {
-        OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[BOSS_DIALOG_LOCK] channel=boss event=%s action=deferred remaining=%llu",
-               event == OR_BOSS_DIALOG_HALF ? "half" : "spawn",
-               (unsigned long long)(state->boss_lock_until_tick - now_tick));
-        return false;
-    }
     voice_id = boss_voice_id(npc_type);
     if (voice_id >= 1024u || !boss_voice_find(voice_id)) return false;
     boss_name = boss_name_zh(npc_type);
@@ -748,7 +665,7 @@ bool or_broadcast_emit_boss_dialog(OR_BroadcastState *state, const OR_Runtime *r
                              "╰─ 起源律动 · 首领事件 ─╯", rgba, true) && card_ok;
     if (!card_ok) return false;
     state->last_emit_tick=now_tick;
-    state->boss_lock_until_tick = now_tick + OR_BOSS_DIALOG_LOCK_TICKS;
+    state->boss_lock_until_tick = now_tick + 120u;
     OR_LOG(MOD_LOG_LEVEL_INFO,
            "[BOSS_DIALOG] type=%u voiceId=%u event=%s summon=%u killsBefore=%u lockUntil=%llu",
            (unsigned)npc_type, (unsigned)voice_id,
@@ -783,7 +700,7 @@ bool or_broadcast_emit_boss_player_death(OR_BroadcastState *state,
     ok = emit_card_line(runtime, "boss", "╰─ Boss战 · 领域仍在 ─╯", rgba, true) && ok;
     if (!ok) return false;
     state->last_emit_tick = now_tick;
-    state->boss_lock_until_tick = now_tick + OR_BOSS_DIALOG_LOCK_TICKS;
+    state->boss_lock_until_tick = now_tick + 120u;
     OR_LOG(MOD_LOG_LEVEL_INFO, "[BOSS_PLAYER_DEATH] type=%u voiceId=%u count=%u lockUntil=%llu",
            (unsigned)npc_type, (unsigned)voice_id, (unsigned)death_count,
            (unsigned long long)state->boss_lock_until_tick);

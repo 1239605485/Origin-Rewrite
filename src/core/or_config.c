@@ -71,6 +71,7 @@ void or_config_default(OR_Config *config) {
     config->schema_version = 6;
     config->enable_elites = true;
     config->enable_gameplay_hooks = true;
+    config->enable_boss_ai = true;
     config->max_active_elites = 8u;
     config->same_npc_cooldown_ticks = 60u;
     config->journey_probability_multiplier = 1.0f;

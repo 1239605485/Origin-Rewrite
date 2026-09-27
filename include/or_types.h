@@ -229,6 +229,7 @@ typedef struct OR_Config {
     uint32_t schema_version;
     bool enable_elites;
     bool enable_gameplay_hooks;
+    bool enable_boss_ai;
     uint32_t max_active_elites;
     uint64_t same_npc_cooldown_ticks;
     float journey_probability_multiplier;
