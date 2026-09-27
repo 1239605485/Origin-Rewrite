@@ -93,6 +93,10 @@ bool or_spawn_try_commit(const OR_Config *config,
             ? OR_SPAWN_REJECT_INELIGIBLE_NPC : OR_SPAWN_REJECT_NOT_AUTHORITY;
         return false;
     }
+    if (context->boss_encounter_active && !context->is_boss) {
+        out_result->reason = OR_SPAWN_REJECT_INELIGIBLE_SOURCE;
+        return false;
+    }
     if (context->npc_type == 0u || context->is_town_npc || context->is_friendly || context->is_dummy ||
         (context->is_boss && !config->eligibility.allow_bosses) ||
         (context->is_segment && !config->eligibility.allow_segments) ||

@@ -33,6 +33,7 @@ typedef struct OR_SpawnContext {
     bool host_authority;
     bool single_player;
     bool is_boss;
+    bool boss_encounter_active;
     bool is_town_npc;
     bool is_friendly;
     bool is_dummy;

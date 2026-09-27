@@ -2441,8 +2441,28 @@ bool or_runtime_probe(OR_Runtime *runtime) {
                                                        false, PATCH_BOOL, sizeof(bool));
         runtime->main_net_mode = or_resolve_field(main_type, "netMode", false,
                                                   PATCH_INT32, sizeof(int32_t));
-        runtime->main_world_id = or_resolve_field(main_type, "worldID", false,
-                                                  PATCH_INT32, sizeof(int32_t));
+        runtime->main_world_id_getter = patchlib_type_get_method_by_param_count
+            ? patchlib_type_get_method_by_param_count(main_type, "get_worldID", 0)
+            : PATCH_NULL;
+        if (or_handle_is_valid(runtime->main_world_id_getter)) {
+            patch_method_signature_t signature;
+            bool signature_ok = false;
+            memset(&signature, 0, sizeof(signature));
+            if (patchlib_method_get_signature &&
+                patchlib_method_get_signature(runtime->main_world_id_getter, &signature)) {
+                signature_ok = !signature.is_instance &&
+                    signature.return_type == PATCH_INT32 &&
+                    tefstd_vector_size &&
+                    tefstd_vector_size(&signature.arg_types) == 0u;
+                if (patchlib_method_signature_free) {
+                    (void)patchlib_method_signature_free(&signature);
+                }
+            }
+            if (!signature_ok) {
+                or_release_handle(runtime->main_world_id_getter);
+                runtime->main_world_id_getter = PATCH_NULL;
+            }
+        }
         runtime->main_update_count = or_resolve_field_any(main_type, update_count_names,
                                                           sizeof(update_count_names) / sizeof(update_count_names[0]),
                                                           false, PATCH_UINT64, sizeof(uint64_t));
@@ -2654,7 +2674,7 @@ void or_runtime_cleanup(OR_Runtime *runtime) {
     or_release_handle(runtime->main_zenith_world);
     or_release_handle(runtime->main_hard_mode);
     or_release_handle(runtime->main_net_mode);
-    or_release_handle(runtime->main_world_id);
+    or_release_handle(runtime->main_world_id_getter);
     or_release_handle(runtime->main_update_count);
     or_release_handle(runtime->main_day_time);
     or_release_handle(runtime->main_time);

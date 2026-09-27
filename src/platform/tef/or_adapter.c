@@ -181,20 +181,24 @@ void or_adapter_set_private_dir(const char *private_dir) {
     (void)snprintf(g_private_dir, sizeof(g_private_dir), "%s", private_dir);
 }
 
-static uint64_t world_rules_fingerprint(uint64_t session,
-                                        OR_TerrainSnapshot terrain,
-                                        OR_ProgressStage progress) {
+static uint64_t world_rules_fingerprint(uint64_t world_id) {
     uint64_t h = UINT64_C(1469598103934665603);
-    h ^= session; h *= UINT64_C(1099511628211);
-    h ^= (uint64_t)terrain.depth + ((uint64_t)terrain.biome << 8) + ((uint64_t)terrain.special << 16);
-    h *= UINT64_C(1099511628211);
-    h ^= (uint64_t)progress; h *= UINT64_C(1099511628211);
+    h ^= world_id; h *= UINT64_C(1099511628211);
+    h ^= UINT64_C(0x4f524947574f524c); h *= UINT64_C(1099511628211);
     return h ? h : 1u;
+}
+
+static bool world_rules_path(uint64_t fingerprint, char *out, size_t out_size) {
+    int length;
+    if (!out || out_size == 0u || !g_private_dir[0]) return false;
+    length = snprintf(out, out_size, "%s/or_world_rules_%016llx.bin",
+                      g_private_dir, (unsigned long long)fingerprint);
+    return length > 0 && (size_t)length < out_size;
 }
 
 static bool world_rules_load(uint64_t fingerprint, OR_WorldRuleState *state) {
     char path[832]; uint64_t stored = 0u; FILE *f;
-    if (!g_private_dir[0] || !state || snprintf(path, sizeof(path), "%s/or_world_rules.bin", g_private_dir) <= 0) return false;
+    if (!state || !world_rules_path(fingerprint, path, sizeof(path))) return false;
     f = fopen(path, "rb"); if (!f) return false;
     if (fread(&stored, sizeof(stored), 1u, f) != 1u || stored != fingerprint || fread(state, sizeof(*state), 1u, f) != 1u) { fclose(f); return false; }
     fclose(f); return true;
@@ -202,7 +206,8 @@ static bool world_rules_load(uint64_t fingerprint, OR_WorldRuleState *state) {
 
 static void world_rules_save(uint64_t fingerprint, const OR_WorldRuleState *state) {
     char path[832]; char temp[840]; FILE *f;
-    if (!g_private_dir[0] || !state || snprintf(path, sizeof(path), "%s/or_world_rules.bin", g_private_dir) <= 0 || snprintf(temp, sizeof(temp), "%s.tmp", path) <= 0) return;
+    if (!state || !world_rules_path(fingerprint, path, sizeof(path)) ||
+        snprintf(temp, sizeof(temp), "%s.tmp", path) <= 0) return;
     f = fopen(temp, "wb"); if (!f) return;
     if (fwrite(&fingerprint, sizeof(fingerprint), 1u, f) == 1u && fwrite(state, sizeof(*state), 1u, f) == 1u) { fflush(f); fclose(f); (void)rename(temp, path); } else fclose(f);
 }
@@ -218,6 +223,15 @@ static uint32_t boss_dialog_key(uint32_t npc_type) {
     case 128u: case 129u: return 127u;
     default: return npc_type;
     }
+}
+
+static bool boss_encounter_active(void) {
+    size_t i;
+    for (i = 0u; i < sizeof(g_adapter.boss_active_by_type) /
+                            sizeof(g_adapter.boss_active_by_type[0]); ++i) {
+        if (g_adapter.boss_active_by_type[i]) return true;
+    }
+    return false;
 }
 static uint32_t g_batch_drop_index;
 static uint64_t g_fallback_world_session = 1u;
@@ -1539,8 +1553,11 @@ static uint64_t world_session_id(void) {
     static bool probe_read_ok;
     static int32_t probe_last_id;
     bool read_ok = g_adapter.runtime &&
-                   read_i32(g_adapter.runtime->main_world_id, NULL, &world_id) &&
-                   world_id > 0;
+                   g_adapter.runtime->main_world_id_getter &&
+                   patchlib_method_invoke_args &&
+                   patchlib_method_invoke_args(
+                       g_adapter.runtime->main_world_id_getter, PATCH_NULL,
+                       &world_id, NULL) && world_id > 0;
     if (!probe_initialized || read_ok != probe_read_ok || (read_ok && world_id != probe_last_id)) {
         probe_initialized = true;
         probe_read_ok = read_ok;
@@ -1548,7 +1565,7 @@ static uint64_t world_session_id(void) {
         OR_LOG(MOD_LOG_LEVEL_INFO,
                "[WORLD_ID_PROBE] read=%s worldId=%d source=%s fallback=%s",
                read_ok ? "ok" : "failed", (int)world_id,
-               read_ok ? "Main.worldID" : "none", read_ok ? "no" : "safe_default");
+               read_ok ? "Main.get_worldID()" : "none", read_ok ? "no" : "safe_default");
         if (!read_ok && g_adapter.runtime) {
             bool zenith = false, hardmode = false;
             int32_t max_tiles_y = 0;
@@ -1628,7 +1645,7 @@ static void ensure_world_rules(OR_ProgressStage progress,
                                bool is_night,
                                uint64_t session,
                                uint64_t game_day) {
-    uint64_t fingerprint = world_rules_fingerprint(session, terrain, progress);
+    uint64_t fingerprint = world_rules_fingerprint(session);
     if (!g_adapter.config) return;
     if (!g_adapter.world_rules.initialized ||
         g_adapter.world_rules_session != session) {
@@ -2417,6 +2434,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     bool single_player = false;
     bool authority_known = false;
     bool archetype_known = false;
+    bool boss_blocks_rewrite = false;
     OR_AiArchetype native_archetype;
     uint64_t session;
     uint64_t tick;
@@ -2452,6 +2470,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     binding->roll_resolved = true;
     session = world_session_id();
     tick = update_tick();
+    boss_blocks_rewrite = !is_boss && boss_encounter_active();
     memset(&context, 0, sizeof(context));
     context.world_session_id = session;
     context.world_rule_seed = session;
@@ -2462,6 +2481,7 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
     context.host_authority = true;
     context.single_player = single_player;
     context.is_boss = is_boss;
+    context.boss_encounter_active = boss_blocks_rewrite;
     context.is_town_npc = is_town;
     context.is_friendly = is_friendly;
     context.is_dummy = false;
@@ -2504,11 +2524,24 @@ static bool commit_elite_from_baseline(patch_handle_t instance,
         if (eligibility_log_samples < 128u) {
             ++eligibility_log_samples;
             OR_LOG(MOD_LOG_LEVEL_INFO,
-                   "[ELIGIBILITY] type=%u friendly=%s townNPC=%s boss=%s damage=%d decision=%s",
+                   "[ELIGIBILITY] type=%u friendly=%s townNPC=%s boss=%s damage=%d "
+                   "bossEncounter=%s decision=%s",
                    (unsigned)npc_type, is_friendly ? "yes" : "no",
                    is_town ? "yes" : "no", is_boss ? "yes" : "no",
                    (int)vanilla->damage,
-                   (is_friendly || is_town || is_boss || vanilla->damage <= 0) ? "skip" : "roll");
+                   boss_blocks_rewrite ? "active" : "no",
+                   (is_friendly || is_town || is_boss || vanilla->damage <= 0 ||
+                    boss_blocks_rewrite) ? "skip" : "roll");
+        }
+    }
+    if (boss_blocks_rewrite) {
+        static uint32_t boss_guard_logs;
+        if (boss_guard_logs < 64u) {
+            ++boss_guard_logs;
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[BOSS_SPAWN_GUARD] type=%u decision=skip "
+                   "reason=unclassified_hostile_spawn_during_boss_encounter",
+                   (unsigned)npc_type);
         }
     }
     memset(&spawn, 0, sizeof(spawn));
@@ -3396,6 +3429,8 @@ static void update_boss_ai(patch_handle_t instance,
     input.player_x = g_adapter.last_player_position[0];
     input.player_y = g_adapter.last_player_position[1];
     input.life_ratio = ratio;
+    input.npc_velocity_x = velocity[0];
+    input.npc_velocity_y = velocity[1];
     if (!or_boss_ai_step(&binding->boss_ai, &input, &output)) return;
 
     if (output.velocity_delta_x != 0.0f || output.velocity_delta_y != 0.0f) {

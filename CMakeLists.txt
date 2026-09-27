@@ -63,7 +63,7 @@ target_include_directories(OriginRewrite
 target_compile_definitions(OriginRewrite PRIVATE
     ORIGINREWRITE_BUILDING=1
     BUILDING_DLL=1
-    ORIGINREWRITE_VERSION="1.2.1"
+    ORIGINREWRITE_VERSION="1.2.3"
 )
 
 if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -170,4 +170,27 @@ if (ORIGINREWRITE_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
     add_test(NAME originrewrite_visual_policy_test
         COMMAND originrewrite_visual_policy_test)
+
+    add_executable(originrewrite_world_rules_test
+        tests/world_rules_test.c
+        ${ORIGINREWRITE_CORE_SOURCES})
+    target_include_directories(originrewrite_world_rules_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                "${ORIGINREWRITE_MOD_API_DIR}")
+    if (UNIX AND NOT APPLE)
+        target_link_libraries(originrewrite_world_rules_test PRIVATE m)
+    endif()
+    add_test(NAME originrewrite_world_rules_test COMMAND originrewrite_world_rules_test)
+
+    add_executable(originrewrite_boss_spawn_guard_test
+        tests/boss_spawn_guard_test.c
+        ${ORIGINREWRITE_CORE_SOURCES})
+    target_include_directories(originrewrite_boss_spawn_guard_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                "${ORIGINREWRITE_MOD_API_DIR}")
+    if (UNIX AND NOT APPLE)
+        target_link_libraries(originrewrite_boss_spawn_guard_test PRIVATE m)
+    endif()
+    add_test(NAME originrewrite_boss_spawn_guard_test
+        COMMAND originrewrite_boss_spawn_guard_test)
 endif()

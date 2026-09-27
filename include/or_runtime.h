@@ -103,7 +103,7 @@ typedef struct OR_Runtime {
     patch_handle_t main_zenith_world;
     patch_handle_t main_hard_mode;
     patch_handle_t main_net_mode;
-    patch_handle_t main_world_id;
+    patch_handle_t main_world_id_getter;
     patch_handle_t main_update_count;
     patch_handle_t main_day_time;
     patch_handle_t main_time;

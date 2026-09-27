@@ -47,7 +47,7 @@ TEFManager 安装时会把 `Resources` 内容放入模组私有目录，运行�
 7. 额外掉落检查 `[ITEM_WRITEBACK_VERIFY]`；只有 `match=yes` 才算额外奖励成功。多人客户端暂不作为验收目标。
 
 未经日志验证前不要打开 `feature_fallbacks.json` 所标识的危险原生能力。当前安装包的
-v1.2.1 的 Boss 对话优先锁定与脚下特效修复尚未经过目标 APK 与 Android ARM64 设备战斗回归，因此 `Info.json`
+v1.2.3 的 Boss 对话优先锁定、脚下特效修复、召唤物隔离、按世界规则存档与克苏鲁之眼新 AI 尚未经过目标 APK 与 Android ARM64 设备战斗回归，因此 `Info.json`
 标记为 `stableVerified=false`、`experimental=true`。请完成 Boss 召唤、施压循环、重复召唤、关闭开关和普通敌怪/原版掉落回归后，再调整发布标记。
 
 仓库中的 `.github/workflows/build-android.yml` 会自动执行 JSON 校验、宿主 C 语法检查、Android ARM64

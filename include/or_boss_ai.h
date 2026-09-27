@@ -26,6 +26,8 @@ typedef struct OR_BossAiInput {
     float player_x;
     float player_y;
     float life_ratio;
+    float npc_velocity_x;
+    float npc_velocity_y;
 } OR_BossAiInput;
 
 typedef struct OR_BossAiOutput {
