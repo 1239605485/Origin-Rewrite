@@ -1,6 +1,9 @@
-# OriginRewrite v1.2.3 重构边界与验收记录
+# OriginRewrite v1.2.4 重构边界与验收记录
 
 ## 本次改动
+
+- 根据 v1.2.3 运行日志，启动在 `[WORLD_ID_PROBE]` 后中断，且未进入 Boss AI。移除可选静态 `Main.time` 字段的解析与读取；世界日计数使用 `Main.dayTime` 边沿，读取失败时使用 `GameUpdateCount`。
+- 修复版需要设备确认：日志应在 `[WORLD_ID_PROBE]` 后继续出现 `[WORLD_CLOCK]`、`[WORLD_RULES]` 与 `[MODULE_BEACON] stage=ready`。
 
 - Boss encounter 活跃时，非 Boss 敌怪不会进入重构抽取；这是对内核缺少可靠召唤者来源标记的保守隔离。
 - `Main.worldID` 改为调用静态 getter `Main.get_worldID()` 读取；世界规则存档文件名按世界 ID 生成，避免不同世界共享固定回退 ID 和同一存档文件。
@@ -49,7 +52,7 @@
 
 ## Android 设备验收顺序
 
-1. 先备份一个单机世界，安装 v1.2.3。
+1. 先备份一个单机世界，安装 v1.2.4。
 2. 查看日志 `[BOSS_AI_GATE]`，确认 AI 开关启用，位置和速度字段可用。
 3. 召唤克苏鲁之眼。日志应出现 `[BOSS_PRIORITY_LOCK]`，并出现 `[BOSS_AI_PHASE]` 的 telegraph、pressure、recovery 和 cooldown 循环；用低血量阶段确认冲刺频率增加。再测试其他白名单 Boss，确认旧阶段时序没有变化。
 4. 继续观察 Boss 原版攻击、移动和死亡结算；验证其没有额外弹幕、召唤物或精英前缀。

@@ -63,7 +63,7 @@ target_include_directories(OriginRewrite
 target_compile_definitions(OriginRewrite PRIVATE
     ORIGINREWRITE_BUILDING=1
     BUILDING_DLL=1
-    ORIGINREWRITE_VERSION="1.2.3"
+    ORIGINREWRITE_VERSION="1.2.4"
 )
 
 if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")

@@ -147,7 +147,6 @@ typedef struct OR_Adapter {
     uint64_t world_clock_session;
     uint64_t world_clock_start_tick;
     uint64_t game_day_counter;
-    double last_world_time;
     bool last_day_time;
     bool world_clock_initialized;
     OR_PlayerRuleAdapter player_rules;
@@ -1595,14 +1594,23 @@ static uint64_t update_tick(void) {
 static uint64_t read_game_day(void) {
     uint64_t tick = update_tick();
     uint64_t session = world_session_id();
+    static bool clock_probe_logged;
     bool day_time = true;
     bool day_ok = false;
-    double world_time = 0.0;
-    bool time_ok = false;
 
     if (g_adapter.runtime) {
+        if (!clock_probe_logged) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[WORLD_CLOCK_READ] phase=begin source=Main.dayTime");
+        }
         day_ok = read_bool(g_adapter.runtime->main_day_time, NULL, &day_time);
-        time_ok = read_double(g_adapter.runtime->main_time, NULL, &world_time);
+        if (!clock_probe_logged) {
+            OR_LOG(MOD_LOG_LEVEL_INFO,
+                   "[WORLD_CLOCK_READ] phase=complete result=%s value=%s",
+                   day_ok ? "ok" : "fallback",
+                   day_time ? "day" : "night");
+            clock_probe_logged = true;
+        }
     }
     if (!g_adapter.world_clock_initialized || g_adapter.world_clock_session != session) {
         g_adapter.world_clock_initialized = true;
@@ -1610,12 +1618,11 @@ static uint64_t read_game_day(void) {
         g_adapter.world_clock_start_tick = tick;
         g_adapter.game_day_counter = 0u;
         g_adapter.last_day_time = day_time;
-        g_adapter.last_world_time = world_time;
         OR_LOG(MOD_LOG_LEVEL_INFO,
-               "[WORLD_CLOCK] session=%llu day=0 source=%s time=%s:%0.1f",
+               "[WORLD_CLOCK] session=%llu day=0 source=%s dayTimeRead=%s",
                (unsigned long long)session,
-               time_ok && day_ok ? "Main.time" : "update_tick_fallback",
-               time_ok ? "ok" : "unavailable", world_time);
+               day_ok ? "Main.dayTime" : "update_tick_fallback",
+               day_ok ? "ok" : "unavailable");
         return 0u;
     }
     if (day_ok && !g_adapter.last_day_time && day_time) {
@@ -1635,7 +1642,6 @@ static uint64_t read_game_day(void) {
         }
     }
     g_adapter.last_day_time = day_time;
-    if (time_ok) g_adapter.last_world_time = world_time;
     return g_adapter.game_day_counter;
 }
 
