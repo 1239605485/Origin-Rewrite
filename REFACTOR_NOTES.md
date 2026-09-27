@@ -1,4 +1,11 @@
-# OriginRewrite v1.2.5 隔离诊断记录
+# OriginRewrite v1.2.5–v1.2.6 隔离诊断记录
+
+## v1.2.6 第二阶段：通用 AI Hook 开启、Boss 状态机关闭
+
+- v1.2.5 的运行日志确认版本为 1.2.5，AI_HOOK_ISOLATION installed=no、P0_GATE 关闭精英提交、HOOK_STATE gameplay=off；用户反馈可以进入游戏。
+- v1.2.6 恢复通用 NPC.AI Hook 与精英提交，只在 update_boss_ai 入口强制返回。预期 AI_HOOK_ISOLATION installed=yes、BOSS_AI_GATE effective=no、HOOK_STATE gameplay=on，但不应有 BOSS_AI_PHASE。
+- 若 v1.2.6 再现进图闪退，优先修复通用 Hook/回调边界或世界上下文读取；若稳定进入并且普通怪物正常，再在备份世界召唤支持的 Boss，验证状态机保持关闭后仍稳定。
+- 此版本仍是诊断构建。游戏版本 1.4.5.8.6 高于声明的最高兼容版本 1.4.5.8.5；诊断结果不能作为该游戏版本正式兼容的依据。
 
 ## v1.2.5 NPC.AI Hook 隔离
 

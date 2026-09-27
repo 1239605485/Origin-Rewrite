@@ -1,4 +1,4 @@
-# OriginRewrite｜起源重构 v1.2.5 NPC.AI Hook 隔离诊断版
+# OriginRewrite｜起源重构 v1.2.6 Boss AI 状态机隔离诊断版
 
 > Android ARM64 · Terraria 手机版 1.4.x · TEFKernel / KernelLoader · 单机
 
@@ -43,13 +43,13 @@
 
 重构体的名称会保留原怪物名并加上层级前缀。灾变体、终焉体、世界规则、地形和天气均使用独立的显眼淡色中文播报，便于玩家在战斗中区分来源。
 
-v1.2.5 是用于排查进地图闪退的隔离诊断版。它跳过 NPC.AI Hook 安装；由于精英身份提交依赖首次 AI 回调，本版也会自动关闭精英提交、Boss AI 和依赖该回调的运行功能。保留其余初始化路径，以比较同一设备进入地图时是否仍崩溃。此版用于定位问题，不作为正常游玩版本。
+v1.2.5 的隔离测试已能进入游戏，日志确认 NPC.AI Hook 未安装、Boss AI 与精英提交均关闭。v1.2.6 是第二阶段诊断版：恢复通用 NPC.AI Hook 与精英生命周期，只强制跳过 Boss 专属状态机，用于确认闪退来自通用 Hook 回调，还是 Boss AI 状态逻辑。
 
-## v1.2.5 隔离诊断说明
+## v1.2.6 第二阶段诊断说明
 
-本版在编译期关闭 NPC.AI Hook，不会在 NPC.AI 回调中读取玩家规则、世界时钟或执行 Boss 阶段逻辑。启动日志应出现 `[AI_HOOK_ISOLATION] installed=no`、`[P0_GATE] AI postfix unavailable` 和 `[HOOK_STATE] version=1.2.5 gameplay=off`。如果仍在相同位置闪退，NPC.AI Hook 回调路径就不是唯一原因；如果可以进入地图，下一版应只恢复 Hook 并保持 Boss 状态机关闭，继续区分通用 Hook 与 Boss AI 阶段逻辑。
+本版安装通用 NPC.AI Hook、保留精英提交，但关闭 Boss 专属状态机。启动日志应出现 [AI_HOOK_ISOLATION] installed=yes、[BOSS_AI_GATE] effective=no 和 [HOOK_STATE] version=1.2.6 gameplay=on。若进图仍闪退，说明问题在通用 AI Hook 回调或它调用的世界上下文流程；若可进图，再用备份世界召唤一个支持的 Boss 验证不会出现 [BOSS_AI_PHASE]，之后才能把范围缩小到 Boss 专属状态机。
 
-本版会关闭精英属性提交，因此不要用它进行正常战斗或保存重要进度。使用可恢复的备份世界完成一次进图测试即可。
+本版保留精英强化，仍是诊断构建。请用备份世界，先只测试进图与普通怪物；不要把诊断结果当作 Boss AI 已恢复正常。
 
 ## v1.2.0–v1.2.4 模块边界、Boss AI 与回归修复
 
