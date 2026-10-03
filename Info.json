@@ -1,31 +1,50 @@
 {
   "pkgId": "li06.originrewrite",
-  "name": "OriginRewrite｜起源重构",
+  "name": "OriginRewrite｜架构重制验证版",
   "author": "liuxin",
-  "version": "1.2.6",
-  "versionCode": 2026092803,
-  "brieflyDescribe": "起源重构 v1.2.6：恢复 NPC.AI Hook，隔离 Boss AI 状态机。",
-  "description": "第二阶段诊断版本：恢复通用 NPC.AI Hook 与精英提交，强制跳过 Boss 专属 AI 状态机，用于区分 Hook 回调与 Boss AI 逻辑。仅支持 Android ARM64 单机。",
+  "version": "2.0.0-alpha.1",
+  "versionCode": 2026100301,
+  "brieflyDescribe": "R0/R1：只读生命周期基线、独立 Boss 战斗对话与开关。",
+  "description": "新架构第一阶段。读取并观察游戏状态，不改写敌怪属性，不新增 Boss AI。精英生成、AI、掉落和脚下特效将在后续阶段接入。需要真机验证。",
   "features": [
-    "MECHANICS_CHANGE",
-    "DIFFICULTY_MOD",
-    "PROGRESSION_SYSTEM"
+    "MECHANICS_CHANGE"
   ],
   "sizeCategory": "TINY",
-  "targetGameVersion": "1.4.5.8.5",
-  "minGameVersion": "1.4.4.0",
-  "maxGameVersion": "1.4.5.8.5",
+  "targetGameVersion": "1.4.5.8.6",
+  "minGameVersion": "1.4.5.8.0",
+  "maxGameVersion": "1.4.5.8.6",
   "support": {
-    "android": { "arm64": true, "arm": false, "x64": false, "x86": false },
-    "windows": { "arm64": false, "arm": false, "x64": false, "x86": false },
-    "linux": { "arm64": false, "arm": false, "x64": false, "x86": false },
-    "mac": { "arm64": false, "arm": false, "x64": false, "x86": false },
-    "ios": { "arm64": false, "arm": false, "x64": false, "x86": false }
+    "android": {
+      "arm64": true,
+      "arm": false,
+      "x64": false,
+      "x86": false
+    }
   },
   "dependence": [],
-  "conflicts": [],
+  "conflicts": [
+    "eternal.future.elitemonsters"
+  ],
   "stableVerified": false,
   "experimental": true,
   "deprecated": false,
-  "hasExtendedContent": true
+  "hasExtendedContent": true,
+  "settings": [
+    {
+      "key": "enableBossDialog",
+      "title": "Boss 战斗对话",
+      "description": "显示本模组的 Boss 战斗文字。关闭后清理待播对话，不改变原版 Boss 行为。重启游戏确保生效。",
+      "type": "SWITCH",
+      "defaultValue": true,
+      "section": "战斗信息"
+    },
+    {
+      "key": "enableDiagnostics",
+      "title": "私有诊断日志",
+      "description": "记录有界生命周期健康统计；接口和初始化错误仍保留。",
+      "type": "SWITCH",
+      "defaultValue": true,
+      "section": "诊断"
+    }
+  ]
 }

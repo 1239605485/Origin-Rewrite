@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "values": {
+    "enableBossDialog": true,
+    "enableDiagnostics": true
+  }
+}

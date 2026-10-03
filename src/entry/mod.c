@@ -1,105 +1,28 @@
-#include <stddef.h>
-
 #include "mod_core.h"
-#include "mod_logger.h"
-
+#include "app/or_app.h"
+#include "ports/or_tef.h"
 #include "or_log.h"
-
-#include "or_config.h"
-#include "or_config_io.h"
-#include "or_adapter.h"
-#include "or_runtime.h"
-#include "or_state.h"
-
-__attribute__((visibility("default"))) void (*mod_logger_write)(
-    mod_log_level_t level, const char *tag, const char *fmt, ...) = NULL;
-
-static OR_Config g_config;
-static OR_StateStore g_state;
-static OR_Runtime g_runtime;
-
-#define OR_LOG(level, ...) do { or_log_write((level), __VA_ARGS__); } while (0)
-
-static kernel_mod_info_t g_mod_info = {
-    .pkg_id = "li06.originrewrite",
-    .version_code = 2026092803,
-    .api_version = 1,
-    .version = "1.2.6"
-};
-
-static void init_mod(kernel_mod_handle_t *handle) {
-    bool config_ok;
-    bool runtime_ok;
-    OR_ConfigIoReport config_report = {0};
-    or_log_init(handle);
-    OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=1.2.6 versionCode=2026092803 stage=enter");
-    OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[ARCHITECTURE] core=pure-c metadata=TEFKernel-PatchLib "
-           "lifecycle=AI-hook-on/Boss-state-machine-diagnostic-off failPolicy=SAFE-OFF");
-
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[INIT_STAGE] config_begin");
-    or_config_default(&g_config);
-    (void)or_config_io_apply_private(
-        handle ? handle->private_dir : NULL, &g_config, &config_report);
-    config_ok = or_config_validate(&g_config);
-    OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[INIT_STAGE] config_done ok=%s file=%s parsed=%s overrides=%u invalid=%u "
-           "classicChance=%.3f maxActive=%u",
-           config_ok ? "yes" : "no",
-           config_report.file_found ? "yes" : "no",
-           config_report.parsed ? "yes" : "no",
-           (unsigned)config_report.overrides_applied,
-           (unsigned)config_report.invalid_values,
-           (double)g_config.modes[OR_MODE_CLASSIC].elite_chance,
-           (unsigned)g_config.max_active_elites);
-    or_state_store_init(&g_state);
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[INIT_STAGE] state_done");
-    or_runtime_init(&g_runtime);
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[INIT_STAGE] runtime_probe_begin");
-    runtime_ok = or_runtime_probe(&g_runtime);
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[INIT_STAGE] runtime_probe_done ok=%s", runtime_ok ? "yes" : "no");
-
-
-    if (!config_ok) {
-        OR_LOG(MOD_LOG_LEVEL_ERROR, "Configuration validation failed; reconstruction overlay is disabled");
-        g_config.enable_elites = false;
-    }
-    if (!runtime_ok) {
-        OR_LOG(MOD_LOG_LEVEL_WARNING, "TEFKernel PatchLib probe failed; gameplay hooks remain disabled");
-    } else {
-        or_adapter_set_private_dir(handle ? handle->private_dir : NULL);
-        if (!or_adapter_start(&g_runtime, &g_config, &g_state)) {
-        OR_LOG(MOD_LOG_LEVEL_WARNING,
-               "Verified mobile NPC hooks were not installable; gameplay overlay remains disabled");
-        }
-    }
-    OR_LOG(MOD_LOG_LEVEL_INFO, "[HOOK_STATE] version=1.2.6 gameplay=%s metadata=%s",
-           g_runtime.capabilities.gameplay_enabled ? "on" : "off",
-           "PatchLib");
-    OR_LOG(MOD_LOG_LEVEL_INFO,
-           "[MODULE_BEACON] version=1.2.6 versionCode=2026092803 stage=ready");
+#include "or_version.h"
+static OR_App application;
+static bool initialized;
+static void init(kernel_mod_handle_t *handle) {
+    if (initialized) return;
+    const char *dir=handle?handle->private_dir:NULL;
+    or_log_open(dir); OR_Config config; bool found;
+    bool valid=or_config_load(dir,&config,&found);
+    or_log("BUILD","version=%s code=%d stage=R0/R1 gameplayWrites=off",OR_VERSION,OR_VERSION_CODE);
+    or_log("CONFIG","found=%d valid=%d enableBossDialog=%d diagnostics=%d",found,valid,config.boss_dialog,config.diagnostics);
+    or_app_init(&application,dir,config,(OR_TextPort){NULL,or_tef_text});
+    bool ok=or_tef_start((OR_ObserverPort){&application,or_app_world,or_app_npc});
+    if (!ok) or_app_stop(&application);
+    initialized=true; or_log("READY","observation=%d dialogue=%d",ok,ok&&config.boss_dialog);
 }
-
-static void cleanup_mod(kernel_mod_handle_t *handle) {
-    (void)handle;
-    or_adapter_stop();
-    or_runtime_cleanup(&g_runtime);
-    or_state_store_init(&g_state);
-    OR_LOG(MOD_LOG_LEVEL_INFO, "Origin Rewrite core unloaded");
-    or_log_shutdown();
+static void cleanup(kernel_mod_handle_t *handle) {
+    (void)handle; if (!initialized) return;
+    or_app_stop(&application); bool ok=or_tef_stop();
+    or_log("STOP","hooksRemoved=%d",ok); initialized=false; or_log_close();
 }
-
-static kernel_mod_info_t *get_info(void) {
-    return &g_mod_info;
-}
-
-static kernel_mod_ops_t g_ops = {
-    .init_mod = init_mod,
-    .cleanup_mod = cleanup_mod,
-    .get_info = get_info
-};
-
-kernel_mod_ops_t *create_kernel_mod(void) {
-    return &g_ops;
-}
+static kernel_mod_info_t info={OR_PACKAGE_ID,OR_VERSION_CODE,1,OR_VERSION};
+static kernel_mod_info_t *get_info(void) { return &info; }
+static kernel_mod_ops_t ops={init,cleanup,get_info};
+__attribute__((visibility("default"))) kernel_mod_ops_t *create_kernel_mod(void) { return &ops; }

@@ -1,6 +1,0 @@
-{
-  "schemaVersion": 1,
-  "enabled": true,
-  "reason": "boss_true_all_bosses_safe_broadcast",
-  "cooldownTicks": 120
-}

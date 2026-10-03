@@ -1,196 +1,33 @@
-cmake_minimum_required(VERSION 3.22.1)
-
-project("OriginRewrite" LANGUAGES C)
-
+cmake_minimum_required(VERSION 3.22)
+project(OriginRewrite C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_C_VISIBILITY_PRESET hidden)
-set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-
-set(ORIGINREWRITE_MOD_API_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/mod-api"
-    CACHE PATH "TEFKernel mod-api directory")
-
-if (NOT EXISTS "${ORIGINREWRITE_MOD_API_DIR}/mod_core.h")
-    message(FATAL_ERROR
-        "TEFKernel mod-api not found. Set ORIGINREWRITE_MOD_API_DIR to the mod-api directory.")
-endif()
-
-set(ORIGINREWRITE_CORE_SOURCES
-    src/core/or_ai.c
-    src/core/or_boss_ai.c
-    src/core/or_broadcast_priority.c
-    src/core/or_config.c
-    src/core/or_compat.c
-    src/core/or_item_registry.c
-    src/core/or_loot.c
-    src/core/or_prng.c
-    src/core/or_rules.c
-    src/core/or_spawn.c
-    src/core/or_state.c
-    src/core/or_stats.c
-    src/core/or_world.c
-    src/core/or_visual_policy.c
-    src/core/or_player_rule_adapter.c
-    src/core/or_boss_dialog_adapter.c
-)
-
-set(ORIGINREWRITE_PLATFORM_SOURCES
-    src/entry/mod.c
-    src/core/or_death_probe.c
-    src/platform/tef/or_log.c
-    src/platform/tef/or_config_io.c
-    src/platform/tef/or_adapter.c
-    src/platform/tef/or_runtime.c
-    src/platform/tef/or_broadcast.c
-    src/platform/tef/or_visual_effects.c
-    src/platform/tef/or_head_marker.c
-    "${ORIGINREWRITE_MOD_API_DIR}/tefkernel/tef_api_imp.c"
-)
-
-add_library(OriginRewrite SHARED
-    ${ORIGINREWRITE_CORE_SOURCES}
-    ${ORIGINREWRITE_PLATFORM_SOURCES}
-)
-
-target_include_directories(OriginRewrite
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        "${ORIGINREWRITE_MOD_API_DIR}"
-)
-
-target_compile_definitions(OriginRewrite PRIVATE
-    ORIGINREWRITE_BUILDING=1
-    BUILDING_DLL=1
-    ORIGINREWRITE_VERSION="1.2.6"
-)
-
-if (ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Android")
-    set(ORIGINREWRITE_SYSTEM "android")
-    add_subdirectory(xdl EXCLUDE_FROM_ALL)
-    set_target_properties(xdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_definitions(OriginRewrite PRIVATE
-        ORIGINREWRITE_USE_ANDROID_LOG=1
-    )
-    target_link_libraries(OriginRewrite PRIVATE xdl log dl m)
-    target_link_options(OriginRewrite PRIVATE "-Wl,--exclude-libs,ALL")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(ORIGINREWRITE_SYSTEM "windows")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(ORIGINREWRITE_SYSTEM "darwin")
+set(CORE
+    src/domain/or_lifecycle.c src/domain/or_effects.c src/storage/or_config.c
+    src/presentation/or_notice.c src/presentation/or_boss.c src/app/or_app.c)
+set(PLATFORM
+    src/platform/tef/or_probe.c src/platform/tef/or_read.c src/platform/tef/or_hooks.c
+    src/storage/or_log.c src/entry/mod.c mod-api/tefkernel/tef_api_imp.c)
+add_library(OriginRewrite SHARED ${CORE} ${PLATFORM})
+target_include_directories(OriginRewrite PRIVATE include mod-api)
+target_compile_options(OriginRewrite PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(OriginRewrite PRIVATE m)
+if(ANDROID)
+    if(NOT ANDROID_ABI STREQUAL "arm64-v8a")
+        message(FATAL_ERROR "This validation build supports Android ARM64 only")
+    endif()
+    set_target_properties(OriginRewrite PROPERTIES OUTPUT_NAME "OriginRewrite.android.arm64")
 else()
-    set(ORIGINREWRITE_SYSTEM "linux")
-    target_link_libraries(OriginRewrite PRIVATE m)
-endif()
-
-if (ANDROID_ABI STREQUAL "arm64-v8a" OR CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-    set(ORIGINREWRITE_ARCH "arm64")
-elseif (ANDROID_ABI STREQUAL "armeabi-v7a" OR CMAKE_ANDROID_ARCH_ABI STREQUAL "armeabi-v7a")
-    set(ORIGINREWRITE_ARCH "arm")
-elseif (ANDROID_ABI STREQUAL "x86_64" OR CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
-    set(ORIGINREWRITE_ARCH "x64")
-elseif (ANDROID_ABI STREQUAL "x86" OR CMAKE_ANDROID_ARCH_ABI STREQUAL "x86")
-    set(ORIGINREWRITE_ARCH "x86")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-    set(ORIGINREWRITE_ARCH "x64")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "i[3-6]86|x86")
-    set(ORIGINREWRITE_ARCH "x86")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    set(ORIGINREWRITE_ARCH "arm64")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "armv7|armv7a|ARMv7|arm")
-    set(ORIGINREWRITE_ARCH "arm")
-elseif (CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(ORIGINREWRITE_ARCH "x64")
-else()
-    set(ORIGINREWRITE_ARCH "x86")
-endif()
-
-if (WIN32)
-    set_target_properties(OriginRewrite PROPERTIES PREFIX "" SUFFIX ".dll")
-elseif (APPLE)
-    set_target_properties(OriginRewrite PROPERTIES SUFFIX ".dylib")
-else()
-    set_target_properties(OriginRewrite PROPERTIES SUFFIX ".so")
-endif()
-
-set_target_properties(OriginRewrite PROPERTIES
-    OUTPUT_NAME "OriginRewrite.${ORIGINREWRITE_SYSTEM}.${ORIGINREWRITE_ARCH}"
-    POSITION_INDEPENDENT_CODE ON
-)
-
-option(ORIGINREWRITE_BUILD_TESTS "Build pure-core tests" ON)
-
-if (ORIGINREWRITE_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING AND
-    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/core_test.c")
+    set_target_properties(OriginRewrite PROPERTIES OUTPUT_NAME "OriginRewrite.host")
     enable_testing()
-    add_executable(originrewrite_core_test
-        tests/core_test.c
-        ${ORIGINREWRITE_CORE_SOURCES}
-        src/platform/tef/or_config_io.c
-    )
-    target_include_directories(originrewrite_core_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    if (UNIX AND NOT APPLE)
-        target_link_libraries(originrewrite_core_test PRIVATE m)
-    endif()
-    add_test(NAME originrewrite_core_test COMMAND originrewrite_core_test)
-endif()
-
-if (ORIGINREWRITE_BUILD_TESTS AND NOT EXISTS
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests/core_test.c")
-    message(STATUS "OriginRewrite core tests are not included in this source archive")
-endif()
-
-if (ORIGINREWRITE_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
-    enable_testing()
-    add_executable(originrewrite_boss_ai_test
-        tests/boss_ai_test.c
-        src/core/or_boss_ai.c)
-    target_include_directories(originrewrite_boss_ai_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    if (UNIX AND NOT APPLE)
-        target_link_libraries(originrewrite_boss_ai_test PRIVATE m)
-    endif()
-    add_test(NAME originrewrite_boss_ai_test COMMAND originrewrite_boss_ai_test)
-
-    add_executable(originrewrite_broadcast_priority_test
-        tests/broadcast_priority_test.c
-        src/core/or_broadcast_priority.c)
-    target_include_directories(originrewrite_broadcast_priority_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                "${ORIGINREWRITE_MOD_API_DIR}")
-    add_test(NAME originrewrite_broadcast_priority_test
-        COMMAND originrewrite_broadcast_priority_test)
-
-    add_executable(originrewrite_visual_policy_test
-        tests/visual_policy_test.c
-        src/core/or_visual_policy.c)
-    target_include_directories(originrewrite_visual_policy_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    add_test(NAME originrewrite_visual_policy_test
-        COMMAND originrewrite_visual_policy_test)
-
-    add_executable(originrewrite_world_rules_test
-        tests/world_rules_test.c
-        ${ORIGINREWRITE_CORE_SOURCES})
-    target_include_directories(originrewrite_world_rules_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                "${ORIGINREWRITE_MOD_API_DIR}")
-    if (UNIX AND NOT APPLE)
-        target_link_libraries(originrewrite_world_rules_test PRIVATE m)
-    endif()
-    add_test(NAME originrewrite_world_rules_test COMMAND originrewrite_world_rules_test)
-
-    add_executable(originrewrite_boss_spawn_guard_test
-        tests/boss_spawn_guard_test.c
-        ${ORIGINREWRITE_CORE_SOURCES})
-    target_include_directories(originrewrite_boss_spawn_guard_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                "${ORIGINREWRITE_MOD_API_DIR}")
-    if (UNIX AND NOT APPLE)
-        target_link_libraries(originrewrite_boss_spawn_guard_test PRIVATE m)
-    endif()
-    add_test(NAME originrewrite_boss_spawn_guard_test
-        COMMAND originrewrite_boss_spawn_guard_test)
+    add_executable(test_core tests/test_core.c ${CORE})
+    target_include_directories(test_core PRIVATE include)
+    target_link_libraries(test_core PRIVATE m)
+    add_test(NAME core_contracts COMMAND test_core)
+    add_executable(test_platform tests/test_platform.c ${CORE}
+        src/platform/tef/or_probe.c src/platform/tef/or_read.c src/platform/tef/or_hooks.c
+        mod-api/tefkernel/tef_api_imp.c)
+    target_include_directories(test_platform PRIVATE include mod-api src/platform/tef)
+    target_link_libraries(test_platform PRIVATE m)
+    add_test(NAME platform_contracts COMMAND test_platform)
 endif()
