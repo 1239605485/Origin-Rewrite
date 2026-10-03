@@ -1,6 +1,6 @@
 # OriginRewrite 架构重制验证版
 
-版本：2.0.0-alpha.1。阶段：R0/R1 源码与本机验证完成，Android 构建及真机验收待完成。
+版本：2.0.0-alpha.2。阶段：R0/R1 源码与本机验证完成，Android 构建及真机验收待完成。
 
 **这是新版架构的第一阶段，不是旧版全部功能的替代成品。** 本版观察世界及 NPC 生命周期，接入独立 Boss 对话通道，不修改怪物属性、速度、伤害、掉落或世界结构。普通精英生成、规则、附加 AI、奖励和脚下特效按后续阶段接入。
 
@@ -40,9 +40,9 @@ Android ARM64：设置 `ANDROID_NDK_HOME` 指向 NDK，然后执行：
 bash scripts/package_android_arm64.sh
 ```
 
-或者将源码根目录放入自己的 GitHub 仓库，运行 `OriginRewrite rebuild ARM64` 工作流；本次没有替用户创建或推送仓库，也没有运行远程 CI。工作流沿用上传源码中的 NDK 26.3.11579264 和构建方式，仍需一次真实运行验证。
+或者将源码根目录放入自己的 GitHub 仓库，运行 `OriginRewrite rebuild ARM64` 工作流；本次没有替用户创建或推送仓库，也没有运行远程 CI。工作流沿用上传源码中的 NDK 26.3.11579264 和构建方式，仍需一次真实运行验证。alpha.2 显式设置 SDK 初始化包为 `platform-tools`，修复上传日志中 `Failed to find package 'tools'` 导致的提前退出。指定 NDK 仍在下一步单独安装。
 
-脚本会验证产物为 AArch64 ELF，再生成 `dist/OriginRewrite-v2.0.0-alpha.1-android-arm64.zip`。安装包根目录直接包含 Manifest.json、Info.json、OriginRewrite.json 和 Resources，不增加外层文件夹。
+脚本会验证产物为 AArch64 ELF，再生成 `dist/OriginRewrite-v2.0.0-alpha.2-android-arm64.zip`。安装包根目录直接包含 Manifest.json、Info.json、OriginRewrite.json 和 Resources，不增加外层文件夹。
 
 ## 设置与测试
 

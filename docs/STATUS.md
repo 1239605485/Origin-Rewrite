@@ -1,6 +1,10 @@
-# 2.0.0-alpha.1 交付状态
+# 2.0.0-alpha.2 交付状态
 
 本轮完成：R0 源码审计与可构建基线、R1 生命周期接口与观察实现，另接入 Boss 对话基础通道。不是 R0–R7 全部完成。
+
+## alpha.2 构建修复
+
+用户上传的 GitHub Actions 日志显示，`setup-android@v3` 默认请求 `tools platform-tools`，在 `sdkmanager tools` 步骤报找不到包，尚未开始 Android 模组编译。本版显式覆盖为 `packages: platform-tools`，保留 NDK 26.3.11579264 的单独安装步骤。该修复已做本机检查，云端重新构建仍待执行。玩法与 R0/R1 阶段范围不变。
 
 ## 验证结果
 

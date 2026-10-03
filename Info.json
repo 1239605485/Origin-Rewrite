@@ -2,8 +2,8 @@
   "pkgId": "li06.originrewrite",
   "name": "OriginRewrite｜架构重制验证版",
   "author": "liuxin",
-  "version": "2.0.0-alpha.1",
-  "versionCode": 2026100301,
+  "version": "2.0.0-alpha.2",
+  "versionCode": 2026100302,
   "brieflyDescribe": "R0/R1：只读生命周期基线、独立 Boss 战斗对话与开关。",
   "description": "新架构第一阶段。读取并观察游戏状态，不改写敌怪属性，不新增 Boss AI。精英生成、AI、掉落和脚下特效将在后续阶段接入。需要真机验证。",
   "features": [

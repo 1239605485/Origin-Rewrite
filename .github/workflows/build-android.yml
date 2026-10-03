@@ -22,6 +22,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # Override v3 defaults: the obsolete tools package is unavailable.
+          packages: platform-tools
       - name: Install NDK and package
         run: |
           sdkmanager "ndk;${ANDROID_NDK_VERSION}"
